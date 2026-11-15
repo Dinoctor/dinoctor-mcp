@@ -1,0 +1,17 @@
+{
+  "name": "dinoctor",
+  "owner": {
+    "name": "Dinoctor",
+    "url": "https://dinoctor.com"
+  },
+  "metadata": {
+    "description": "Dinoctor's plugin for Claude: direct animated videos in the free Dinoctor app."
+  },
+  "plugins": [
+    {
+      "name": "dinoctor",
+      "source": "./",
+      "description": "Direct animated videos in the free Dinoctor app: MCP server plus a directing skill."
+    }
+  ]
+}

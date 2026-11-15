@@ -30,7 +30,17 @@ Open Settings, Developer, Edit Config, and add:
 
 Restart Claude Desktop.
 
-### Claude Code
+### Claude Code (plugin: server plus a directing skill)
+
+The plugin adds the server and a skill that teaches Claude how to direct a good video: plan a hook, pick ids from the style's library, act, move the camera, check every shot with `look`, and always ask before spending credits.
+
+```
+/plugin install dinoctor --marketplace Dinoctor/dinoctor-mcp
+```
+
+On older Claude Code: `/plugin marketplace add Dinoctor/dinoctor-mcp`, then `/plugin install dinoctor@dinoctor`.
+
+Server only:
 
 ```bash
 claude mcp add dinoctor --scope user -- npx -y dinoctor-mcp
@@ -38,7 +48,9 @@ claude mcp add dinoctor --scope user -- npx -y dinoctor-mcp
 
 ### Cursor
 
-Add to `~/.cursor/mcp.json` (or your project's `.cursor/mcp.json`):
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=dinoctor&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImRpbm9jdG9yLW1jcCJdfQ==)
+
+Or add to `~/.cursor/mcp.json` (or your project's `.cursor/mcp.json`):
 
 ```json
 {
@@ -61,6 +73,12 @@ The Dinoctor app is also the server: in Dinoctor open **Help, Connect to Claude 
 
 - Mac: `/Applications/Dinoctor.app/Contents/MacOS/Dinoctor --mcp`
 - Windows: `%LOCALAPPDATA%\Programs\Dinoctor\Dinoctor.exe --mcp`
+
+Use one way, not both, or your AI app will see every tool twice.
+
+### The directing skill in other apps
+
+The skill is a plain file: [skills/dinoctor-director/SKILL.md](skills/dinoctor-director/SKILL.md). In Claude Desktop or claude.ai, zip the `dinoctor-director` folder and upload it as a skill in Settings. In other apps, paste it into the project's rules or instructions.
 
 ## How it finds Dinoctor
 

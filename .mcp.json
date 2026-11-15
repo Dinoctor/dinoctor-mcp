@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dinoctor": {
+      "command": "npx",
+      "args": ["-y", "dinoctor-mcp"]
+    }
+  }
+}

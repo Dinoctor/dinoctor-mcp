@@ -1,0 +1,10 @@
+{
+  "name": "dinoctor",
+  "version": "0.1.0",
+  "description": "Direct animated videos in the free Dinoctor app: the Dinoctor MCP server plus a skill that teaches Claude how to make a good video with it.",
+  "author": { "name": "Dinoctor", "url": "https://dinoctor.com" },
+  "homepage": "https://dinoctor.com",
+  "repository": "https://github.com/Dinoctor/dinoctor-mcp",
+  "license": "MIT",
+  "keywords": ["video", "animation", "mcp", "dinoctor"]
+}
