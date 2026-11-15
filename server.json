@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Dinoctor/dinoctor-mcp",
+  "title": "Dinoctor",
+  "description": "Direct animated videos in the free Dinoctor app: scenes, shots, cast, camera, light, voice, music, render.",
+  "websiteUrl": "https://dinoctor.com",
+  "repository": {
+    "url": "https://github.com/Dinoctor/dinoctor-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "dinoctor-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DINOCTOR_APP",
+          "description": "Full path to the Dinoctor app, only if it isn't installed in the usual place.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

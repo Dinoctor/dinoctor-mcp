@@ -1,0 +1,44 @@
+{
+  "name": "dinoctor-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Dinoctor, the free animated-video app: let Claude, Cursor or any MCP client direct a video in the open app.",
+  "mcpName": "io.github.Dinoctor/dinoctor-mcp",
+  "type": "module",
+  "bin": {
+    "dinoctor-mcp": "src/server.mjs"
+  },
+  "main": "src/server.mjs",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node test/list-tools.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.5.4"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dinoctor",
+    "video",
+    "animation",
+    "claude",
+    "cursor"
+  ],
+  "homepage": "https://dinoctor.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dinoctor/dinoctor-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Dinoctor/dinoctor-mcp/issues"
+  },
+  "license": "MIT",
+  "author": "Dinoctor"
+}
