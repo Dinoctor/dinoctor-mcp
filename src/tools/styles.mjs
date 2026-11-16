@@ -6,6 +6,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { api, page } from "../connect.mjs";
+import { CHANGE, LOCAL, READ, REPLACE, SET } from "./hints.mjs";
 
 const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".svg": "image/svg+xml", ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".m4v": "video/x-m4v" };
 
@@ -49,21 +50,26 @@ const BUILD_COST =
 
 const drawTool = (kind) => ({
   name: `draw_${kind}`,
-  description: `Draw a new ${kind} yourself, in the current style's format, and add it to the person's library${kind === "place" ? " and set it as the shot's place" : " and into a shot"}. No Claude usage or credits are spent: you send the drawing as plain data and Dinoctor checks it (bad fields are dropped; a drawing that fails is refused with the reason). Call describe_drawing first to get the exact format for the current style. Formats in short: Pixel = {"name","rows":["..##..",...],"colors":{"#":"#535353"}${kind === "character" ? ',"eyes":[[col,row]],"mouth":[col,row]' : ""}} (up to 28x28, '.' empty${kind === "character" ? ", facing right, at least 20 columns wide" : ""}); Toon = ${kind === "character" ? '{"name","skin","shirt","pants","hair":"tuft|bob|ears|antennae|cap|horns|none","hairColor","snout","tail","wide","tall"}' : kind === "object" ? '{"name","w","h","shapes":[{"type":"rect|ellipse|poly","x","y","w","h","color","points"}]} (y up is negative, stands on y 0)' : "a place object"}; Voxel = {"name","boxes":[{"at":[x,y,z],"size":[w,h,d],"color"${kind === "character" ? ',"part":"body|legL|legR|armL|armR"' : ""}}]${kind === "character" ? ',"eyes","mouth","faceZ"' : ""}}; other styles have their own format (describe_drawing). Places in every style: {"name","sky","horizon","floor","dark","stars","clouds","orb","items":[{"kind","x","z","size"}]}. Then use look to check it.`,
+  description: `Draw a new ${kind} yourself, free, in the current style's format, and add it to the person's library${kind === "place" ? " and set it as the shot's place" : " and into a shot"}. Use it for simple ${kind}s the style doesn't have; for a photo-like picture use generate_${kind === "place" ? "place" : kind === "character" ? "character" : "picture"} (paid). No Claude usage or credits are spent: you send the drawing as plain data and Dinoctor checks it (bad fields are dropped; a drawing that fails is refused with the reason). Call describe_drawing first for the exact format. Formats in short: Pixel = {"name","rows":["..##..",...],"colors":{"#":"#535353"}${kind === "character" ? ',"eyes":[[col,row]],"mouth":[col,row]' : ""}} (up to 28x28, '.' empty${kind === "character" ? ", facing right, at least 20 columns wide" : ""}); Toon = ${kind === "character" ? '{"name","skin","shirt","pants","hair":"tuft|bob|ears|antennae|cap|horns|none","hairColor","snout","tail","wide","tall"}' : kind === "object" ? '{"name","w","h","shapes":[{"type":"rect|ellipse|poly","x","y","w","h","color","points"}]} (y up is negative, stands on y 0)' : "a place object"}; Voxel = {"name","boxes":[{"at":[x,y,z],"size":[w,h,d],"color"${kind === "character" ? ',"part":"body|legL|legR|armL|armR"' : ""}}]${kind === "character" ? ',"eyes","mouth","faceZ"' : ""}}; other styles have their own format (describe_drawing). Places in every style: {"name","sky","horizon","floor","dark","stars","clouds","orb","items":[{"kind","x","z","size"}]}. Returns the new id. Then use look to check it.`,
   schema: {
     drawing: z.record(z.any()).describe("ONE drawing object in the style's format (not an array)."),
     addToShot: z.boolean().optional().describe(`false only saves it to the library. Default true: ${kind === "place" ? "it becomes the shot's place" : "it joins the shot's cast"}.`),
     ...where,
     ...(kind === "place" ? {} : { x: z.number().optional().describe("Left to right, about -6 to 6. Empty spaces it automatically."), size: z.number().optional().describe("1 is normal.") }),
   },
+  annotations: CHANGE,
   run: (a) => page(`draw_${kind}`, a),
 });
+
+const OWN = "The person's own style id from my_styles (built-in styles can't be used here).";
 
 export const STYLES = [
   {
     name: "my_styles",
-    description: "The person's own art styles (ones Claude built for them in Dinoctor), with their ratings, plus the style job running now (building or fixing, its progress). Use the id with use_style, fix_style, rate_style or delete_style. Built-in styles are listed by list_styles.",
+    description:
+      "Read-only: the person's own art styles (ones Claude built for them in Dinoctor) with id, name, a short about, tokens used and their star rating, plus the style job running now (building or fixing, with progress). Use an id with use_style, fix_style, rate_style or delete_style. Built-in styles are listed by list_styles.",
     schema: {},
+    annotations: READ,
     run: async () => {
       const [mine, rated] = await Promise.all([api("GET", "/api/my-styles"), api("GET", "/api/my-styles/ratings").catch(() => ({ ratings: [] }))]);
       return {
@@ -74,7 +80,7 @@ export const STYLES = [
   },
   {
     name: "make_style",
-    description: `Start building a brand-new art style for the person, the same as Dinoctor's "Build your own style". ${BUILD_COST} Without confirm: true it only tells you what will happen; ask the person, then call again with confirm: true. Only one style job runs at a time. Then follow it with style_status.`,
+    description: `Start building a brand-new art style from words and/or example pictures, the same as Dinoctor's "Build your own style". ${BUILD_COST} Without confirm: true it only says what will happen; ask the person, then call again with confirm: true. Only one style job runs at a time. Then follow it with style_status. To fix a style that exists use fix_style; to resume a stopped build use continue_style.`,
     schema: {
       name: z.string().max(30).describe("The style's name, up to 30 characters."),
       words: z.string().max(4000).optional().describe("The look: characters, world, mood, lettering. Needed unless files are sent."),
@@ -82,6 +88,7 @@ export const STYLES = [
       useProjectFiles: z.boolean().optional().describe("Also send the files already added in Dinoctor's Build your own box."),
       confirm: z.boolean().optional().describe("true starts it (uses the person's Claude usage). Only after the person said yes."),
     },
+    annotations: LOCAL,
     run: async (a) => {
       if (!a.name?.trim()) throw new Error("Give the style a name first.");
       if (!a.words?.trim() && !a.files?.length && !a.useProjectFiles) throw new Error("Describe the style in words, or send some files that show it.");
@@ -96,8 +103,10 @@ export const STYLES = [
   },
   {
     name: "style_status",
-    description: "How the style build or fix is going: status (running, done, failed, cancelled), step and its name, what Claude does right now, minutes so far and left (a rough guess), tokens used, errors and problems. When it's done, use_style switches to it and rate_style asks how it went. When it failed and canContinue is true, continue_style picks up where it stopped. close: true clears a finished job from the screen.",
+    description:
+      "How the style build or fix (make_style, fix_style, continue_style) is going: status (running, done, failed, cancelled), step and its name, what Claude does right now, minutes so far and left (a rough guess), tokens, errors and problems. Read-only unless close: true, which clears a finished job from Dinoctor's screen. When done, use_style switches to it and rate_style records how it went; when failed with canContinue, use continue_style. To stop it, use cancel_style.",
     schema: { close: z.boolean().optional().describe("Clear a finished, failed or cancelled job from Dinoctor's screen.") },
+    annotations: READ,
     run: async (a) => {
       if (a.close) await page("style_action", { action: "dismiss" });
       const { job } = await api("GET", "/api/my-styles");
@@ -106,8 +115,10 @@ export const STYLES = [
   },
   {
     name: "continue_style",
-    description: "A style build or fix that stopped with canContinue: true (see style_status) carries on from where it stopped, in the same Claude session. It uses more of the person's Claude usage, so it needs confirm: true after the person agrees.",
-    schema: { confirm: z.boolean().optional() },
+    description:
+      "Resume a style build or fix that stopped part way (style_status says canContinue: true), in the same Claude session, from where it stopped. Uses more of the person's Claude usage, so the first call only says what will happen; call again with confirm: true after they agree. Fails if nothing can be continued. To start a new style use make_style; to repair a finished one use fix_style.",
+    schema: { confirm: z.boolean().optional().describe("true only after the person agreed to use more Claude usage.") },
+    annotations: LOCAL,
     run: async (a) => {
       const { job } = await api("GET", "/api/my-styles");
       if (!job?.canContinue) throw new Error("There's nothing to continue: no style job stopped part way. See style_status.");
@@ -118,8 +129,14 @@ export const STYLES = [
   },
   {
     name: "fix_style",
-    description: "Ask Claude to fix a problem in one of the person's own styles (ids from my_styles), like Dinoctor's Fix a problem. Claude reads the note, fixes the code, runs the tests, checks a test shot and redraws the pictures: usually about 10 minutes, using the person's Claude usage. The style stays as it was until the fix passes. Needs confirm: true after the person agrees.",
-    schema: { id: z.string(), words: z.string().max(4000).describe("What's wrong, in plain words."), confirm: z.boolean().optional() },
+    description:
+      "Ask Claude to fix a problem in one of the person's own finished styles, like Dinoctor's Fix a problem: it reads the note, fixes the code, runs the tests, checks a test shot and redraws the pictures (about 10 minutes of the person's Claude usage). The style stays as it was until the fix passes. The first call only says what will happen; call again with confirm: true after the person agrees. Follow it with style_status. For a stopped build use continue_style; for a new style use make_style.",
+    schema: {
+      id: z.string().describe(OWN),
+      words: z.string().max(4000).describe("What's wrong, in plain words."),
+      confirm: z.boolean().optional().describe("true only after the person agreed to use their Claude usage."),
+    },
+    annotations: LOCAL,
     run: async (a) => {
       const { styles, job } = await api("GET", "/api/my-styles");
       const s = styles.find((x) => x.id === a.id);
@@ -133,8 +150,10 @@ export const STYLES = [
   },
   {
     name: "cancel_style",
-    description: "Stop the style build or fix that's running. Nothing is changed: the person's styles stay as they were.",
+    description:
+      "Stop the style build or fix that's running (make_style, fix_style, continue_style). Nothing is changed: the person's styles stay as they were. Returns the job's state, or a note if nothing runs. To only check progress, use style_status.",
     schema: {},
+    annotations: LOCAL,
     run: async () => {
       const { job } = await api("GET", "/api/my-styles");
       if (job?.status !== "running") return { note: "No style job is running.", job: shortJob(job) };
@@ -149,8 +168,14 @@ export const STYLES = [
   },
   {
     name: "rate_style",
-    description: "Save the person's rating of one of their own styles (1 to 5 stars and a comment), as Dinoctor asks after a build or fix. Only rate with what the person told you. It stays on this computer.",
-    schema: { id: z.string(), stars: z.number().int().min(1).max(5), comment: z.string().max(2000).optional() },
+    description:
+      "Save the person's rating of one of their own styles (1 to 5 stars and a comment), as Dinoctor asks after a build or fix. Only rate with what the person told you; never make up a rating. It stays on this computer. Returns { rated, stars }.",
+    schema: {
+      id: z.string().describe(OWN),
+      stars: z.number().int().min(1).max(5).describe("The person's stars, 1 to 5."),
+      comment: z.string().max(2000).optional().describe("The person's own words about it."),
+    },
+    annotations: SET,
     run: async (a) => {
       const { styles, job } = await api("GET", "/api/my-styles");
       const s = styles.find((x) => x.id === a.id);
@@ -162,8 +187,10 @@ export const STYLES = [
   },
   {
     name: "delete_style",
-    description: "Delete one of the person's own styles for good (ids from my_styles). It can't be undone; templates in it stop opening. Without confirm: true it only says what will go. Dinoctor reloads afterwards.",
-    schema: { id: z.string(), confirm: z.boolean().optional() },
+    description:
+      "Delete one of the person's own styles for good. It can't be undone, and templates in that style stop opening. Without confirm: true it only says what will go; ask the person first. Dinoctor reloads afterwards. Built-in styles can't be deleted. To only stop using it, switch with use_style instead.",
+    schema: { id: z.string().describe(OWN), confirm: z.boolean().optional().describe("true only after the person said to delete it.") },
+    annotations: REPLACE,
     run: async (a) => {
       const { styles } = await api("GET", "/api/my-styles");
       const s = styles.find((x) => x.id === a.id);
@@ -174,30 +201,39 @@ export const STYLES = [
   },
   {
     name: "use_style",
-    description: "Switch the project to another art style (a built-in id from list_styles, or one of the person's own from my_styles). Every shot is rebuilt in the new style: its characters, objects and places are replaced; words, cameras and timing stay. It's one undo step. A style built since Dinoctor opened makes the window reload once.",
-    schema: { id: z.string() },
+    description:
+      "Switch the project to another art style, a built-in id (list_styles) or one of the person's own (my_styles). Every shot is rebuilt in the new style: its characters, objects and places are replaced; words, cameras and timing stay. One undo step, and no confirm step, so ask the person first if the project has work. A style built since Dinoctor opened makes the window reload once. For built-in styles with a confirm step, set_style does the same.",
+    schema: { id: z.string().describe("A style id from list_styles or my_styles.") },
+    annotations: REPLACE,
     run: (a) => page("use_style", a),
   },
   {
     name: "samples",
     description:
-      'Ready-made samples in the current style: whole films and shot runs (Documentary\'s long samples, on shelves like "Whole films", "Film openings", "Hooks"), shot recipes in the other styles (groups like "Big scenes", "Instagram hook"), and samples the person saved. Actions: "list" (shelf or search to narrow; with neither and many samples it lists the shelves), "open" (id: plays it in the preview without adding anything, returns its shots and the pictures it needs), "close", "add" (id, how: "add" puts its shots after the shot, "shot" in place of the shot, "scene" over the whole scene; which shot by shotId or scene/shot, else the one on screen; returns the new shot ids and the picture spots to fill), "needs" (the empty picture spots in the project, or in one scene / one added group; fill them with fill_spot), "save" (name: saves a scene\'s shots as the person\'s own sample).',
+      'Ready-made samples in the current style: whole films and shot runs (on shelves like "Whole films", "Film openings", "Hooks"), shot recipes (groups like "Big scenes", "Instagram hook"), and samples the person saved. action list (read-only; shelf or search narrows it), open (plays one in the preview without adding it; returns its shots and the pictures it needs), close, add (puts its shots in: how add = after the shot, shot = in place of the shot, scene = over the whole scene; returns new shot ids and picture spots to fill), needs (empty picture spots; fill them with fill_spot), save (saves a scene\'s shots as the person\'s own sample). Adding is one undo step. For single ids (a camera, an action) use library; for whole saved projects use templates.',
     schema: {
-      action: z.enum(["list", "open", "close", "add", "needs", "save"]),
+      action: z.enum(["list", "open", "close", "add", "needs", "save"]).describe("What to do (see the description)."),
       id: z.string().optional().describe("A sample id (or exact name) from list."),
-      shelf: z.string().optional(),
-      search: z.string().optional(),
-      how: z.enum(["add", "shot", "scene"]).optional(),
+      shelf: z.string().optional().describe("For list: only this shelf."),
+      search: z.string().optional().describe("For list: words to look for."),
+      how: z.enum(["add", "shot", "scene"]).optional().describe("For add: add = after the shot, shot = in place of the shot, scene = over the whole scene."),
       group: z.string().optional().describe("For needs: the group returned by add."),
-      name: z.string().optional().describe("For save."),
+      name: z.string().optional().describe("For save: the sample's name."),
       ...where,
     },
+    annotations: CHANGE,
     run: (a) => page("samples", a),
   },
   {
     name: "fill_spot",
-    description: 'Put a picture into an empty picture spot a sample is waiting for (a stand-in person, a photo, a screen or a card\'s picture). key comes from samples "needs" or "add". Send a picture file from this computer (full path), or the address of a picture Dinoctor already has (starting with /, as generate or upload tools return).',
-    schema: { key: z.string(), file: z.string().optional().describe("Full path of a png, jpg or webp."), url: z.string().optional() },
+    description:
+      'Put a picture into an empty picture spot a sample is waiting for (a stand-in person, a photo, a screen or a card\'s picture). key comes from samples "needs" or "add". Send a picture file from this computer (full path), or the address of a picture Dinoctor already has (starting with /, as generate or upload tools return). One undo step. To put a picture into a shot\'s cast or background instead, use upload or put_picture.',
+    schema: {
+      key: z.string().describe('The spot\'s key from samples "needs" or "add".'),
+      file: z.string().optional().describe("Full path of a png, jpg or webp."),
+      url: z.string().optional().describe("Or: a Dinoctor picture address starting with /."),
+    },
+    annotations: CHANGE,
     run: (a) => {
       if (a.file) {
         const f = readFile(a.file, { pictureOnly: true });
@@ -209,14 +245,26 @@ export const STYLES = [
   },
   {
     name: "templates",
-    description: 'The person\'s templates (saved whole projects to start from), like Dinoctor\'s Templates page. Actions: "list", "save" (name: saves the project as it is now), "open" (id: replaces the open project with the template; one undo step brings it back), "delete" (id, needs confirm: true after the person agrees).',
-    schema: { action: z.enum(["list", "save", "open", "delete"]), id: z.string().optional(), name: z.string().optional(), confirm: z.boolean().optional() },
+    description:
+      'The person\'s templates (saved whole projects to start from), like Dinoctor\'s Templates page. action list (read-only), save (name: saves the project as it is now), open (id: replaces the open project with the template; one undo step brings it back), delete (id: for good, needs confirm: true after the person agrees). For .dino project files use open_project / save_project; for shot recipes use samples.',
+    schema: {
+      action: z.enum(["list", "save", "open", "delete"]).describe("What to do (see the description)."),
+      id: z.string().optional().describe("A template id from list (open, delete)."),
+      name: z.string().optional().describe("For save: the template's name."),
+      confirm: z.boolean().optional().describe("For delete: true only after the person agreed."),
+    },
+    annotations: REPLACE,
     run: (a) => page("templates", a),
   },
   {
     name: "describe_drawing",
-    description: "The exact drawing format for draw_character, draw_object or draw_place in the current style (or the style given), with the look the style wants and an example when the style has one. Read it before drawing.",
-    schema: { kind: z.enum(["character", "object", "place"]), style: z.string().optional() },
+    description:
+      "Read-only: the exact drawing format for draw_character, draw_object or draw_place in the current style (or the style given), with the look the style wants and an example when it has one. Read it before drawing. It describes the format, not a shot: to see a shot use look; for the project format use how_to.",
+    schema: {
+      kind: z.enum(["character", "object", "place"]).describe("Which draw tool you're about to use."),
+      style: z.string().optional().describe("A style id. Default: the project's style."),
+    },
+    annotations: READ,
     run: (a) => page("describe_drawing", a),
   },
   drawTool("character"),

@@ -7,6 +7,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { api, enginePort, page } from "../connect.mjs";
+import { CHANGE, LOCAL, PAID, READ, SET } from "./hints.mjs";
 
 const PICTURE = /\.(png|jpe?g|webp|gif|svg|avif)$/i;
 const VIDEO = /\.(mp4|mov|m4v|webm|mkv)$/i;
@@ -103,7 +104,7 @@ const generate = (kind, defaultPut) => async (a) => {
   return follow(50);
 };
 const placeSchema = {
-  put: z.enum(["shot", "media", "none"]).optional(),
+  put: z.enum(["shot", "media", "none"]).optional().describe("Where it goes: shot (into the shot), media (the project's Media bin), none (only the generated pictures list)."),
   shot: z.string().optional().describe("Shot id (from get_project). Default: the shot on screen."),
   replace: z.string().optional().describe("A cast member id in that shot whose picture this replaces."),
   name: z.string().optional().describe("A short name for it in the project."),
@@ -111,20 +112,24 @@ const placeSchema = {
 const asOf = (kind, put) => (put === "media" ? "media" : put === "none" ? "none" : kind === "background" ? "background" : kind);
 const genSchema = {
   prompt: z.string().min(1).describe("What to draw, in plain words. @1, @2 point at the reference pictures in order."),
-  quality: z.enum(["1k", "2k", "4k"]).optional().describe("Default 2k."),
+  quality: z.enum(["1k", "2k", "4k"]).optional().describe("Default 2k. About 1.5 / 2 / 3 Higgsfield credits."),
   references: z.array(z.string()).max(4).optional().describe("Paths of up to 4 pictures on this computer to keep the same person or thing."),
   from_pictures: z.array(z.string()).max(4).optional().describe("Ids of pictures made before (generated_pictures) to use as references."),
   confirm: z.boolean().optional().describe("true only after the person agreed to the price."),
   ...placeSchema,
 };
+const PAY = "Spends the person's Higgsfield credits: the first call (without confirm) only returns the price and credits left; ask the person, then call again with the same arguments and confirm: true.";
+const WAIT = "Waits up to about 50 s; if it isn't done, call picture_status.";
 
 // ---- Tools ----
 
 export const MEDIA = [
   {
     name: "generator_account",
-    description: "Which paid generators Dinoctor can use and what's left: Higgsfield (pictures: signed in, credits), ElevenLabs (voices: connected, characters left) and whether Claude Code is here (for writing scripts). sign_in: true opens the person's browser to sign in to Higgsfield themselves.",
-    schema: { sign_in: z.boolean().optional() },
+    description:
+      "Read-only check of the paid services Dinoctor can use and what's left: Higgsfield (pictures: signed in, credits, any job running), ElevenLabs (voices: connected, plan, characters left) and whether Claude Code is here (for writing scripts). Call it before paid tools to see if they will work. sign_in: true opens the person's browser to sign in to Higgsfield themselves.",
+    schema: { sign_in: z.boolean().optional().describe("true: open the person's browser at the Higgsfield sign-in page. Only when they asked to sign in.") },
+    annotations: READ,
     run: async (a) => {
       if (a.sign_in) await api("POST", "/api/generate/login", {});
       const [hf, voice, hello, gen] = await Promise.all([
@@ -142,26 +147,34 @@ export const MEDIA = [
   },
   {
     name: "generate_picture",
-    description: "Make a picture with Higgsfield (Nano Banana) from words: a character or object (its background is taken off) or a background. Spends the person's Higgsfield credits: call first without confirm to get the price, ask the person, then call again with confirm: true. Waits up to ~50 s; if it's not done yet, call picture_status. put: 'media' (default) keeps it in the project's Media, 'shot' puts it in a shot (character/object joins the cast, background becomes the place), 'none' only keeps it in the generated list.",
-    schema: { kind: z.enum(["character", "object", "background"]), ...genSchema },
+    description: `Make any picture with Higgsfield (Nano Banana) from words: a character or object (its background is taken off) or a background. ${PAY} ${WAIT} put defaults to media (the Media bin). Use the shortcuts generate_character (straight into a shot's cast) or generate_place (straight in as the shot's background) when that's what you want. For a free drawing in the style itself, use draw_character, draw_object or draw_place.`,
+    schema: { kind: z.enum(["character", "object", "background"]).describe("character or object (background taken off), or background (a place, no people)."), ...genSchema },
+    annotations: PAID,
     run: (a) => generate(a.kind, asOf(a.kind, a.put ?? "media"))({ ...a, put: undefined }),
   },
   {
     name: "generate_character",
-    description: "Make a character picture with Higgsfield (whole body, background taken off) and add it to a shot's cast (or replace a member's picture with replace). Costs credits: first call returns the price; call again with confirm: true after the person agrees. put: 'media' or 'none' to keep it out of the shot.",
+    description: `Make a character picture with Higgsfield (whole body, background taken off) and add it to a shot's cast, or replace a member's picture with replace. ${PAY} ${WAIT} put: media or none keeps it out of the shot. For objects or other kinds use generate_picture; for a free drawn character in the style use draw_character; to reuse one made before use put_picture.`,
     schema: genSchema,
+    annotations: PAID,
     run: (a) => generate("character", asOf("character", a.put))({ ...a, put: undefined }),
   },
   {
     name: "generate_place",
-    description: "Make a background (a place, no people) with Higgsfield and make it the shot's background. Costs credits: first call returns the price; call again with confirm: true after the person agrees.",
+    description: `Make a background picture (a place, no people) with Higgsfield and make it the shot's background. ${PAY} ${WAIT} For the style's own places use place with a preset (free); for a free drawn place use draw_place; to reuse one made before use put_picture.`,
     schema: genSchema,
+    annotations: PAID,
     run: (a) => generate("background", asOf("background", a.put))({ ...a, put: undefined }),
   },
   {
     name: "picture_status",
-    description: "How the Higgsfield picture being made is going. Waits up to `wait` seconds (default 50) and, when it's done, puts it where generate_* / relight said. stop: true stops it.",
-    schema: { wait: z.number().min(0).max(110).optional(), stop: z.boolean().optional() },
+    description:
+      "Follow the Higgsfield picture being made (by generate_* or relight): waits up to wait seconds and, when it's done, puts it where that call said and returns the picture id. stop: true stops the job instead. Returns { done: false } with the stage if it's still working, or { job: null } if nothing is being made.",
+    schema: {
+      wait: z.number().min(0).max(110).optional().describe("Seconds to wait for it, 0 to 110. Default 50."),
+      stop: z.boolean().optional().describe("true: stop the picture being made."),
+    },
+    annotations: LOCAL,
     run: async (a) => {
       if (a.stop) {
         await api("POST", "/api/generate/stop", {});
@@ -172,8 +185,13 @@ export const MEDIA = [
   },
   {
     name: "generated_pictures",
-    description: "Pictures made with Higgsfield before (kept on this computer for every project): id, kind, what was asked. Use an id with put_picture (free), remove_background, relight, or as from_pictures.",
-    schema: { kind: z.enum(["character", "object", "background"]).optional(), limit: z.number().int().min(1).max(100).optional() },
+    description:
+      "Read-only list of pictures made with Higgsfield before (kept on this computer for every project), newest first: id, kind, what was asked, when, folder. Free to reuse: pass an id to put_picture, remove_background, relight, or as from_pictures in generate_*. Pictures already in the project are in get_shot instead.",
+    schema: {
+      kind: z.enum(["character", "object", "background"]).optional().describe("Only pictures of this kind."),
+      limit: z.number().int().min(1).max(100).optional().describe("Most pictures to list, 1 to 100. Default 30."),
+    },
+    annotations: READ,
     run: async (a) => {
       const { pictures } = await api("GET", "/api/generate/list");
       return pictures.filter((p) => !a.kind || p.kind === a.kind).slice(0, a.limit ?? 30).map((p) => ({ id: p.id, kind: p.kind, asked: p.asked?.slice(0, 120), made: new Date(p.made).toISOString().slice(0, 16), folder: p.folder, warning: p.warning }));
@@ -181,8 +199,16 @@ export const MEDIA = [
   },
   {
     name: "put_picture",
-    description: "Put a picture made before (generated_pictures id) into the project. Free. as: character / object (join a shot's cast, or replace a member's picture), background (the shot's place), media (the Media bin).",
-    schema: { id: z.string(), as: z.enum(["character", "object", "background", "media"]), shot: placeSchema.shot, replace: placeSchema.replace, name: placeSchema.name },
+    description:
+      "Put a picture made before (an id from generated_pictures) into the project, free: as a character or object (joins a shot's cast, or replaces a member's picture), a background (the shot's place) or media (the Media bin). One undo step. Returns where it went. For a file on this computer use upload; for a new picture use generate_*.",
+    schema: {
+      id: z.string().describe("A picture id from generated_pictures."),
+      as: z.enum(["character", "object", "background", "media"]).describe("How it goes into the project."),
+      shot: placeSchema.shot,
+      replace: placeSchema.replace,
+      name: placeSchema.name,
+    },
+    annotations: CHANGE,
     run: async (a) => {
       const { pictures } = await api("GET", "/api/generate/list");
       const pic = pictures.find((p) => p.id === a.id);
@@ -192,8 +218,16 @@ export const MEDIA = [
   },
   {
     name: "remove_background",
-    description: "Take the background off a picture made before (generated_pictures id) with Higgsfield's remover. Uses a little of the person's Higgsfield credits: the first call says so; call again with confirm: true after they agree. Optionally put the result in (put: shot/media, shot, replace).",
-    schema: { id: z.string(), confirm: z.boolean().optional(), as: z.enum(["character", "object", "media"]).optional().describe("Where to put the cut-out; leave out to only change the saved picture."), shot: placeSchema.shot, replace: placeSchema.replace },
+    description:
+      "Take the background off a picture made before (generated_pictures id) with Higgsfield's remover; the saved picture is changed. Uses a little of the person's Higgsfield credits: the first call only says so; call again with confirm: true after they agree. Optionally puts the result into a shot or the Media bin (as). For free trimming, cropping or flipping of a picture already in a shot, use cutout.",
+    schema: {
+      id: z.string().describe("A picture id from generated_pictures."),
+      confirm: z.boolean().optional().describe("true only after the person agreed to spend the credits."),
+      as: z.enum(["character", "object", "media"]).optional().describe("Where to put the cut-out; leave out to only change the saved picture."),
+      shot: placeSchema.shot,
+      replace: placeSchema.replace,
+    },
+    annotations: PAID,
     run: async (a) => {
       const { pictures } = await api("GET", "/api/generate/list");
       const pic = pictures.find((p) => p.id === a.id);
@@ -208,17 +242,18 @@ export const MEDIA = [
   },
   {
     name: "relight",
-    description: "Higgsfield relights a picture photo-real (everything stays, only the light changes), like the Thumbnail studio's Make it real. Give a picture file path or a generated picture id, and the light in words. Costs about the same as a picture (1.5 / 2 / 3 credits for 1k / 2k / 4k): first call returns the price, call again with confirm: true. The result can go to media or a shot's background.",
+    description: `Higgsfield relights a picture photo-real: everything stays, only the light changes (like the Thumbnail studio's Make it real). Give a picture file path or a generated picture id, and the light in words. A new picture is made; the original stays. ${PAY} ${WAIT} The result goes to media, a shot's background, or nowhere. To light a shot in the app itself (free), use light.`,
     schema: {
-      path: z.string().optional(),
+      path: z.string().optional().describe("Full path of a PNG, JPG or WebP on this computer. Or give id."),
       id: z.string().optional().describe("A generated_pictures id instead of a path."),
       light: z.string().min(1).describe("The light, like 'warm low sun from the left, soft blue fill'."),
       tall: z.boolean().optional().describe("Make it 9:16 instead of 16:9."),
-      quality: z.enum(["1k", "2k", "4k"]).optional(),
-      confirm: z.boolean().optional(),
+      quality: z.enum(["1k", "2k", "4k"]).optional().describe("Default 2k. About 1.5 / 2 / 3 credits."),
+      confirm: z.boolean().optional().describe("true only after the person agreed to the price."),
       put: z.enum(["media", "background", "none"]).optional().describe("Default media."),
       shot: placeSchema.shot,
     },
+    annotations: PAID,
     run: async (a) => {
       if (!a.path && !a.id) throw new Error("Give the picture: a path on this computer or a generated picture id.");
       const quality = a.quality ?? "2k";
@@ -241,23 +276,28 @@ export const MEDIA = [
   },
   {
     name: "cutout",
-    description: "Free picture fixes on this computer for a picture already in a shot: trim its empty see-through edges, crop percent off each side, or flip it. Give member (a cast member id with a picture) or leave it out for the shot's background picture.",
+    description:
+      "Free picture fixes on this computer for a picture already in a shot: trim its empty see-through edges, crop a percent off each side, or flip it. Give member (a cast member id with a picture) or leave it out for the shot's background picture. One undo step. Returns the new size. To remove a background (paid), use remove_background.",
     schema: {
       shot: placeSchema.shot,
-      member: z.string().optional(),
-      trim: z.boolean().optional(),
-      flip: z.boolean().optional(),
-      crop: z.object({ top: z.number().optional(), left: z.number().optional(), right: z.number().optional(), bottom: z.number().optional() }).optional().describe("Percent (0-45) off each side."),
+      member: z.string().optional().describe("A cast member id with a picture. Left out: the shot's background picture."),
+      trim: z.boolean().optional().describe("true: cut empty see-through edges."),
+      flip: z.boolean().optional().describe("true: mirror it left to right."),
+      crop: z
+        .object({ top: z.number().optional().describe("Percent off the top."), left: z.number().optional().describe("Percent off the left."), right: z.number().optional().describe("Percent off the right."), bottom: z.number().optional().describe("Percent off the bottom.") })
+        .optional()
+        .describe("Percent (0-45) off each side."),
     },
+    annotations: CHANGE,
     run: (a) => page("media_cutout", a),
   },
   {
     name: "upload",
     description:
-      "Bring a file from this computer into the project, like the page's upload. Pictures (PNG/JPG/WebP/GIF/SVG): as media (the Media bin), character or object (join a shot's cast, or replace a member's picture), background (the shot's place). Videos (MP4/MOV/WebM): as media, video-background or video-front in a shot. Sounds (MP3/WAV/M4A...): as sound (sound Media, and on the film's timeline at `at` seconds if given), music (the film's music, levelled), voice (a voice-over line, see own_voice). Default: media for pictures and videos, sound for sounds.",
+      "Bring a file from this computer into the project, like the app's upload. Pictures (PNG/JPG/WebP/GIF/SVG): as media, character or object (joins a shot's cast or replaces a member's picture), or background. Videos (MP4/MOV/WebM): as media, video-background or video-front in a shot. Sounds (MP3/WAV/M4A...): as sound (sound Media, and on the timeline at `at` if given), music, or voice. Default: media for pictures and videos, sound for sounds. The file is copied into Dinoctor; the original isn't changed. One undo step. For pictures made before with Higgsfield, use put_picture.",
     schema: {
       path: z.string().describe("Full path of the file on this computer."),
-      as: z.enum(["media", "character", "object", "background", "video-background", "video-front", "sound", "music", "voice"]).optional(),
+      as: z.enum(["media", "character", "object", "background", "video-background", "video-front", "sound", "music", "voice"]).optional().describe("How it goes into the project (see the description)."),
       shot: placeSchema.shot,
       replace: placeSchema.replace,
       name: placeSchema.name,
@@ -265,6 +305,7 @@ export const MEDIA = [
       at: z.number().min(0).optional().describe("For as: sound, seconds into the film to place it on a free sound line."),
       trim: z.boolean().optional().describe("For a character/object picture: cut its empty see-through edges (default true)."),
     },
+    annotations: CHANGE,
     run: async (a) => {
       const file = localFile(a.path, null);
       const soundAsked = ["sound", "music", "voice"].includes(a.as);
@@ -289,28 +330,34 @@ export const MEDIA = [
   },
   {
     name: "get_script",
-    description: "The film's script in Sound and script: title, the chosen voice, every line (id, text, feeling, whether it has a voice) and which shots speak it.",
+    description:
+      "Read-only: the film's script from Sound and script: title, the chosen voice, every line (id, text, feeling, whether it has a voice and how long) and which shots speak it. Use line ids with assign_line, speak or own_voice. To put a script in, use write_script.",
     schema: {},
+    annotations: READ,
     run: () => page("media_script_view"),
   },
   {
     name: "write_script",
     description:
-      "Put a script in the film, the way Sound and script does. Give your own `lines` (each one short, 5-15 words, one shot each), or `text` (a whole script, cut into lines at sentences), or only a `topic` (Dinoctor's Claude writes it, matched to the style's sample shots; this uses the person's Claude Code and can take a few minutes). Lines go to the script and, unless put_in_film is false, into a scene: shots there without a voice take lines in order, and each line left over becomes a new shot (a copy of the scene's last shot), sized to the line. Captions show the line's words until it has a voice. replace: false adds to the script instead of replacing it.",
+      "Put a script in the film, the way Sound and script does. Give your own lines (short, 5-15 words, one shot each), or text (a whole script, cut into lines at sentences), or only a topic (Dinoctor's Claude writes it; uses the person's own Claude Code and can take a few minutes, so say so first). Unless put_in_film is false, lines go into a scene: shots there without a voice take lines in order, and each line left over becomes a new shot sized to it. Captions show a line's words until it has a voice. replace: false adds to the script. One undo step. Returns the lines and shots. To make the voices, call speak next; to give one shot one line, use assign_line.",
     schema: {
-      lines: z.array(z.union([z.string(), z.object({ text: z.string(), feeling: z.enum(["neutral", "calm", "warm", "serious", "excited", "playful", "sad", "tense"]).optional() })])).optional(),
-      text: z.string().optional(),
-      topic: z.string().optional(),
+      lines: z
+        .array(z.union([z.string(), z.object({ text: z.string().describe("The line."), feeling: z.enum(["neutral", "calm", "warm", "serious", "excited", "playful", "sad", "tense"]).optional().describe("How it's said.") })]))
+        .optional()
+        .describe("Your own lines, in order: plain strings or { text, feeling }."),
+      text: z.string().optional().describe("A whole script to cut into lines at sentences."),
+      topic: z.string().optional().describe("Only a topic: Dinoctor's Claude writes the script."),
       seconds: z.number().min(30).max(600).optional().describe("For a topic: how long the film is (default 60)."),
-      tone: z.string().optional(),
-      title: z.string().optional(),
-      replace: z.boolean().optional(),
-      put_in_film: z.boolean().optional(),
+      tone: z.string().optional().describe("For a topic: the tone, like 'funny' or 'calm documentary'."),
+      title: z.string().optional().describe("The script's title."),
+      replace: z.boolean().optional().describe("false: add to the script instead of replacing it. Default true."),
+      put_in_film: z.boolean().optional().describe("false: only keep the lines in the script, don't touch shots. Default true."),
       scene: z.number().int().min(0).optional().describe("Scene index from 0. Default: the scene on screen."),
       new_shots: z.boolean().optional().describe("false: leftover lines wait instead of becoming new shots."),
       fit: z.boolean().optional().describe("Existing shots that take a line get the line's length (default true)."),
-      captions: z.boolean().optional(),
+      captions: z.boolean().optional().describe("Show captions of the lines (default true)."),
     },
+    annotations: CHANGE,
     run: async (a) => {
       let lines;
       let title = a.title;
@@ -327,14 +374,22 @@ export const MEDIA = [
   },
   {
     name: "assign_line",
-    description: "Give a shot a script line: the shot speaks its voice (or shows its words as a caption until it has one). Replaces the shot's own voice. fit: true also makes the shot as long as the line.",
-    schema: { line: z.string(), shot: z.string(), fit: z.boolean().optional() },
+    description:
+      "Give one shot one script line: the shot speaks that line's voice (or shows its words as a caption until it has one). It replaces the shot's own voice. One undo step. Returns the shot, line and length. To put a whole script into many shots at once, use write_script.",
+    schema: {
+      line: z.string().describe("A line id from get_script."),
+      shot: z.string().describe("A shot id from get_project."),
+      fit: z.boolean().optional().describe("true: make the shot as long as the line."),
+    },
+    annotations: SET,
     run: (a) => page("media_assign_line", a),
   },
   {
     name: "voices",
-    description: "The ElevenLabs voices in the person's account (id, name, what it sounds like). pick: a voice id makes it the film's voice for speak.",
-    schema: { pick: z.string().optional() },
+    description:
+      "List the ElevenLabs voices in the person's own account (id, name, what it sounds like), read-only. With pick: a voice id becomes the film's voice for speak (one undo step). Needs ElevenLabs connected (see generator_account). Making voices costs characters: that's speak.",
+    schema: { pick: z.string().optional().describe("A voice id from the list to make it the film's voice.") },
+    annotations: SET,
     run: async (a) => {
       const list = await api("GET", "/api/speak/voices");
       const voices = Array.isArray(list) ? list : list.voices ?? [];
@@ -349,15 +404,16 @@ export const MEDIA = [
   {
     name: "speak",
     description:
-      "Make the voice for script lines with ElevenLabs, with the time of every word, and give it to the shots that speak each line (captions follow the words). Spends the person's ElevenLabs characters: call without confirm to get the cost and what's left, ask the person, then call again with confirm: true. lines: line ids (get_script); default every line without a voice. voice: an ElevenLabs voice id (voices), default the film's voice.",
+      "Make the voice for script lines with ElevenLabs, with the time of every word, and give it to the shots that speak each line (captions follow the words; shots fit the voice unless fit is false). Spends the person's ElevenLabs characters: the first call (without confirm) returns the cost and what's left; ask, then call again with confirm: true. Default: every line without a voice, in the film's voice. Returns what was made and characters left. For the person's own recording (free), use own_voice.",
     schema: {
-      lines: z.array(z.string()).optional(),
-      voice: z.string().optional(),
+      lines: z.array(z.string()).optional().describe("Line ids from get_script. Default: every line without a voice."),
+      voice: z.string().optional().describe("An ElevenLabs voice id (voices). Default: the film's voice."),
       model: z.enum(["eleven_multilingual_v2", "eleven_v3", "eleven_flash_v2_5", "eleven_turbo_v2_5"]).optional().describe("Default eleven_multilingual_v2. Flash and turbo cost half."),
       again: z.boolean().optional().describe("Make the voice again even for lines that have one."),
       fit: z.boolean().optional().describe("Shots get the voice's length (default true)."),
-      confirm: z.boolean().optional(),
+      confirm: z.boolean().optional().describe("true only after the person agreed to the cost."),
     },
+    annotations: PAID,
     run: async (a) => {
       const s = await page("media_script_view");
       const voiceId = a.voice ?? s.voice?.id;
@@ -384,8 +440,17 @@ export const MEDIA = [
   },
   {
     name: "own_voice",
-    description: "Use the person's own recording (a sound file on this computer) as a voice: for a script line (line), for a shot (shot: it becomes that shot's line), or as a new line. Its words are heard on this computer when voice text is set up, so captions can follow them. cut_pauses: true takes out long pauses. Free.",
-    schema: { path: z.string(), line: z.string().optional(), shot: z.string().optional(), text: z.string().optional().describe("What it says, if known."), cut_pauses: z.boolean().optional(), fit: z.boolean().optional() },
+    description:
+      "Use the person's own recording (a sound file on this computer) as a voice, free: for a script line (line), for a shot (it becomes that shot's line), or as a new line. Its words are heard on this computer when voice text is set up, so captions can follow them. cut_pauses takes out long pauses. One undo step. For an AI voice (paid) use speak; for music use music.",
+    schema: {
+      path: z.string().describe("Full path of the sound file (MP3, WAV, M4A...)."),
+      line: z.string().optional().describe("A line id from get_script that this recording speaks."),
+      shot: z.string().optional().describe("Or: a shot id; the recording becomes that shot's line."),
+      text: z.string().optional().describe("What it says, if known."),
+      cut_pauses: z.boolean().optional().describe("true: take out long pauses."),
+      fit: z.boolean().optional().describe("true: the shot gets the recording's length."),
+    },
+    annotations: CHANGE,
     run: async (a) => {
       const file = localFile(a.path, SOUNDISH, "a sound file (MP3, WAV, M4A...)");
       // A wrong shot or line is refused before anything is saved or listened to.
@@ -407,8 +472,16 @@ export const MEDIA = [
   },
   {
     name: "music",
-    description: "The film's music: add the person's music file (path; it's levelled so it sits under the voice), set its volume (gain, dB -24 to 6), how far it drops under the voice (duck, dB 0 to 24, default 12), or remove it.",
-    schema: { path: z.string().optional(), name: z.string().optional(), gain: z.number().optional(), duck: z.number().optional(), remove: z.boolean().optional() },
+    description:
+      "The film's background music: add the person's music file (it's levelled so it sits under the voice; the levelled copy replaces it by itself a minute or two later), set its volume and how far it drops under the voice, or remove it. One undo step. Returns the music settings. For short sounds at a moment, use upload as sound or sound_effects.",
+    schema: {
+      path: z.string().optional().describe("Full path of a music file on this computer."),
+      name: z.string().optional().describe("A name for it. Default: the file name."),
+      gain: z.number().optional().describe("Volume in dB, -24 to 6."),
+      duck: z.number().optional().describe("How far it drops under the voice, dB 0 to 24. Default 12."),
+      remove: z.boolean().optional().describe("true: remove the music."),
+    },
+    annotations: SET,
     run: async (a) => {
       let url;
       if (a.path) {
@@ -430,22 +503,23 @@ export const MEDIA = [
   {
     name: "sound_effects",
     description:
-      "Dinoctor's automatic sound effects (from the style's sound pack, worked out from what happens in each shot). Film-wide: on, volume (dB -18 to 6), room (room tone). One shot (shot id; default the shot on screen when any shot setting is given): shot_on, shot_volume, and one sound by its event key (listed in the answer): event_on, pick (another sound from its choices), own_path (the person's own sound file), gain (dB), nudge (frames earlier/later), reset. Call with just shot to list that shot's sounds.",
+      "Dinoctor's automatic sound effects (from the style's sound pack, worked out from what happens in each shot). Film-wide: on, volume, room tone. One shot: shot_on, shot_volume, and one sound by its event key: event_on, pick another sound, own_path (the person's own file), gain, nudge, reset. Call with just shot to list that shot's sounds and their event keys (no change). One undo step per change. For music use music; for any other sound file use upload as sound.",
     schema: {
-      on: z.boolean().optional(),
-      volume: z.number().optional(),
-      room: z.boolean().optional(),
-      shot: z.string().optional(),
-      shot_on: z.boolean().optional(),
-      shot_volume: z.number().optional(),
-      event: z.string().optional(),
-      event_on: z.boolean().optional(),
-      pick: z.string().optional(),
-      own_path: z.string().optional(),
-      gain: z.number().optional(),
-      nudge: z.number().optional(),
-      reset: z.boolean().optional(),
+      on: z.boolean().optional().describe("Film-wide: sound effects on or off."),
+      volume: z.number().optional().describe("Film-wide volume in dB, -18 to 6."),
+      room: z.boolean().optional().describe("Film-wide: quiet room tone under everything."),
+      shot: z.string().optional().describe("A shot id. With only this, lists the shot's sounds."),
+      shot_on: z.boolean().optional().describe("This shot's sound effects on or off."),
+      shot_volume: z.number().optional().describe("This shot's volume in dB."),
+      event: z.string().optional().describe("One sound's event key, from the list."),
+      event_on: z.boolean().optional().describe("That sound on or off."),
+      pick: z.string().optional().describe("Another sound from that event's choices."),
+      own_path: z.string().optional().describe("Full path of the person's own sound file to use for that event."),
+      gain: z.number().optional().describe("That sound's volume in dB."),
+      nudge: z.number().optional().describe("Frames earlier (-) or later (+)."),
+      reset: z.boolean().optional().describe("true: that sound back to automatic."),
     },
+    annotations: SET,
     run: async (a) => {
       const { own_path, ...rest } = a;
       if (own_path) {

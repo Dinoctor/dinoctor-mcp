@@ -1,6 +1,6 @@
 {
   "name": "dinoctor-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for Dinoctor, the free animated-video app: let Claude, Cursor or any MCP client direct a video in the open app.",
   "mcpName": "io.github.Dinoctor/dinoctor-mcp",
   "type": "module",

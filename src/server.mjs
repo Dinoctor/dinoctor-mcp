@@ -13,16 +13,17 @@ import { STYLES } from "./tools/styles.mjs";
 export const TOOLS = [...CORE, ...EDIT, ...SEE, ...MEDIA, ...STYLES];
 
 const server = new McpServer(
-  { name: "dinoctor", version: "0.1.0" },
+  { name: "dinoctor", version: "0.1.1" },
   {
     instructions:
       "Dinoctor is a video app where you direct animated videos: a project has scenes, a scene has shots, and a shot has a place, a cast of characters and objects, actions, text, a camera move, lighting and a transition. Start with open_dinoctor, then get_project. Use library to see what each style offers before choosing ids. After changes, use look to see the shot and fix what's wrong. Tools that spend the person's credits return a price first and need confirm: true; always ask the person before confirming.",
   },
 );
 
+// Each tool has a name, description, zod input schema, annotations (hints, see tools/hints.mjs) and run.
 // A tool returns either a ready MCP result ({ content: [...] }) or any value, sent as JSON text.
 for (const t of TOOLS) {
-  server.tool(t.name, t.description, t.schema, async (args) => {
+  server.registerTool(t.name, { description: t.description, inputSchema: t.schema, annotations: t.annotations }, async (args) => {
     try {
       const out = await t.run(args ?? {});
       if (out && Array.isArray(out.content)) return out;
