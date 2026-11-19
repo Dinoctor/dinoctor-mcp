@@ -7,7 +7,8 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { api, enginePort, page } from "../connect.mjs";
-import { CHANGE, LOCAL, PAID, READ, SET } from "./hints.mjs";
+import { CHANGE, PAID, READ, SET } from "./hints.mjs";
+import { SHOT_ARGS, shotIdOf, withoutShot } from "./shot.mjs";
 
 const PICTURE = /\.(png|jpe?g|webp|gif|svg|avif)$/i;
 const VIDEO = /\.(mp4|mov|m4v|webm|mkv)$/i;
@@ -84,7 +85,7 @@ const follow = async (seconds) => {
       const placed = await putPicture(job.picture, where);
       return { done: true, picture: { id: job.picture.id, kind: job.picture.kind, asked: job.picture.asked }, ...(job.warning ? { warning: job.warning } : {}), ...(placed ? { placed } : {}) };
     }
-    if (Date.now() > until) return { done: false, job: job.id, stage: job.stage, next: "Still working. Call picture_status to wait for it; it puts the picture in when it's done." };
+    if (Date.now() > until) return { done: false, job: job.id, stage: job.stage, next: "Still working. Call generate_picture with action status to wait for it; it puts the picture in when it's done." };
     await sleep(3000);
   }
 };
@@ -103,9 +104,11 @@ const generate = (kind, defaultPut) => async (a) => {
   waiting.set(started.job.id, where(a, defaultPut));
   return follow(50);
 };
+// Shot tools take shot_id or scene + shot; the page side wants the shot's id as `shot`.
+const onShot = async (a) => ({ ...withoutShot(a), shot: await shotIdOf(a) });
 const placeSchema = {
   put: z.enum(["shot", "media", "none"]).optional().describe("Where it goes: shot (into the shot), media (the project's Media bin), none (only the generated pictures list)."),
-  shot: z.string().optional().describe("Shot id (from get_project). Default: the shot on screen."),
+  ...SHOT_ARGS,
   replace: z.string().optional().describe("A cast member id in that shot whose picture this replaces."),
   name: z.string().optional().describe("A short name for it in the project."),
 };
@@ -119,7 +122,7 @@ const genSchema = {
   ...placeSchema,
 };
 const PAY = "Spends the person's Higgsfield credits: the first call (without confirm) only returns the price and credits left; ask the person, then call again with the same arguments and confirm: true.";
-const WAIT = "Waits up to about 50 s; if it isn't done, call picture_status.";
+const WAIT = "Waits up to about 50 s; if it isn't done, call generate_picture with action status.";
 
 // ---- Tools ----
 
@@ -147,46 +150,32 @@ export const MEDIA = [
   },
   {
     name: "generate_picture",
-    description: `Make any picture with Higgsfield (Nano Banana) from words: a character or object (its background is taken off) or a background. ${PAY} ${WAIT} put defaults to media (the Media bin). Use the shortcuts generate_character (straight into a shot's cast) or generate_place (straight in as the shot's background) when that's what you want. For a free drawing in the style itself, use draw_character, draw_object or draw_place.`,
-    schema: { kind: z.enum(["character", "object", "background"]).describe("character or object (background taken off), or background (a place, no people)."), ...genSchema },
-    annotations: PAID,
-    run: (a) => generate(a.kind, asOf(a.kind, a.put ?? "media"))({ ...a, put: undefined }),
-  },
-  {
-    name: "generate_character",
-    description: `Make a character picture with Higgsfield (whole body, background taken off) and add it to a shot's cast, or replace a member's picture with replace. ${PAY} ${WAIT} put: media or none keeps it out of the shot. For objects or other kinds use generate_picture; for a free drawn character in the style use draw_character; to reuse one made before use put_picture.`,
-    schema: genSchema,
-    annotations: PAID,
-    run: (a) => generate("character", asOf("character", a.put))({ ...a, put: undefined }),
-  },
-  {
-    name: "generate_place",
-    description: `Make a background picture (a place, no people) with Higgsfield and make it the shot's background. ${PAY} ${WAIT} For the style's own places use place with a preset (free); for a free drawn place use draw_place; to reuse one made before use put_picture.`,
-    schema: genSchema,
-    annotations: PAID,
-    run: (a) => generate("background", asOf("background", a.put))({ ...a, put: undefined }),
-  },
-  {
-    name: "picture_status",
-    description:
-      "Follow the Higgsfield picture being made (by generate_* or relight): waits up to wait seconds and, when it's done, puts it where that call said and returns the picture id. stop: true stops the job instead. Returns { done: false } with the stage if it's still working, or { job: null } if nothing is being made.",
+    description: `Make a picture with Higgsfield (Nano Banana) from words, and follow or stop the job. action make (default): kind character or object (whole body, its background is taken off) or background (a place, no people); put says where it goes: shot (a character or object joins the shot's cast, or replaces a member's picture with replace; a background becomes the shot's place), media (the Media bin, the default) or none (only the generated pictures list). ${PAY} ${WAIT} action status: waits up to wait seconds for the picture being made (by make or relight) and, when it's done, puts it where that call said and returns its id; { done: false } with the stage while it works, { job: null } when nothing is being made. action stop: stops the picture being made. For a free drawing in the style itself use draw; to reuse a picture made before use put_picture (list them with generated_pictures).`,
     schema: {
-      wait: z.number().min(0).max(110).optional().describe("Seconds to wait for it, 0 to 110. Default 50."),
-      stop: z.boolean().optional().describe("true: stop the picture being made."),
+      action: z.enum(["make", "status", "stop"]).optional().describe("make (default) a new picture, status of the one being made, or stop it."),
+      kind: z.enum(["character", "object", "background"]).optional().describe("make: character or object (background taken off), or background (a place, no people). Needed for make."),
+      ...genSchema,
+      prompt: genSchema.prompt.optional(),
+      wait: z.number().min(0).max(110).optional().describe("status: seconds to wait for it, 0 to 110. Default 50."),
     },
-    annotations: LOCAL,
+    annotations: PAID,
     run: async (a) => {
-      if (a.stop) {
+      const action = a.action ?? "make";
+      if (action === "stop") {
         await api("POST", "/api/generate/stop", {});
         return { stopped: true };
       }
-      return follow(a.wait ?? 50);
+      if (action === "status") return follow(a.wait ?? 50);
+      if (!a.kind) throw new Error("Say what to make with kind: character, object or background.");
+      if (!a.prompt?.trim()) throw new Error("Say what to draw with prompt, in plain words.");
+      const b = await onShot(a);
+      return generate(b.kind, asOf(b.kind, b.put ?? "media"))({ ...b, put: undefined });
     },
   },
   {
     name: "generated_pictures",
     description:
-      "Read-only list of pictures made with Higgsfield before (kept on this computer for every project), newest first: id, kind, what was asked, when, folder. Free to reuse: pass an id to put_picture, remove_background, relight, or as from_pictures in generate_*. Pictures already in the project are in get_shot instead.",
+      "Read-only list of pictures made with Higgsfield before (kept on this computer for every project), newest first: id, kind, what was asked, when, folder. Free to reuse: pass an id to put_picture, remove_background, relight, or as from_pictures in generate_picture. Pictures already in the project are in get_shot instead.",
     schema: {
       kind: z.enum(["character", "object", "background"]).optional().describe("Only pictures of this kind."),
       limit: z.number().int().min(1).max(100).optional().describe("Most pictures to list, 1 to 100. Default 30."),
@@ -200,16 +189,17 @@ export const MEDIA = [
   {
     name: "put_picture",
     description:
-      "Put a picture made before (an id from generated_pictures) into the project, free: as a character or object (joins a shot's cast, or replaces a member's picture), a background (the shot's place) or media (the Media bin). One undo step. Returns where it went. For a file on this computer use upload; for a new picture use generate_*.",
+      "Put a picture made before (an id from generated_pictures) into the project, free: as a character or object (joins a shot's cast, or replaces a member's picture), a background (the shot's place) or media (the Media bin). One undo step. Returns where it went. For a file on this computer use upload; for a new picture use generate_picture.",
     schema: {
       id: z.string().describe("A picture id from generated_pictures."),
       as: z.enum(["character", "object", "background", "media"]).describe("How it goes into the project."),
-      shot: placeSchema.shot,
+      ...SHOT_ARGS,
       replace: placeSchema.replace,
       name: placeSchema.name,
     },
     annotations: CHANGE,
-    run: async (a) => {
+    run: async (raw) => {
+      const a = await onShot(raw);
       const { pictures } = await api("GET", "/api/generate/list");
       const pic = pictures.find((p) => p.id === a.id);
       if (!pic) throw new Error(`No generated picture has the id "${a.id}". Use generated_pictures.`);
@@ -224,11 +214,12 @@ export const MEDIA = [
       id: z.string().describe("A picture id from generated_pictures."),
       confirm: z.boolean().optional().describe("true only after the person agreed to spend the credits."),
       as: z.enum(["character", "object", "media"]).optional().describe("Where to put the cut-out; leave out to only change the saved picture."),
-      shot: placeSchema.shot,
+      ...SHOT_ARGS,
       replace: placeSchema.replace,
     },
     annotations: PAID,
-    run: async (a) => {
+    run: async (raw) => {
+      const a = await onShot(raw);
       const { pictures } = await api("GET", "/api/generate/list");
       const pic = pictures.find((p) => p.id === a.id);
       if (!pic) throw new Error(`No generated picture has the id "${a.id}". Use generated_pictures.`);
@@ -242,7 +233,7 @@ export const MEDIA = [
   },
   {
     name: "relight",
-    description: `Higgsfield relights a picture photo-real: everything stays, only the light changes (like the Thumbnail studio's Make it real). Give a picture file path or a generated picture id, and the light in words. A new picture is made; the original stays. ${PAY} ${WAIT} The result goes to media, a shot's background, or nowhere. To light a shot in the app itself (free), use light.`,
+    description: `Higgsfield relights a picture photo-real: everything stays, only the light changes (like the Thumbnail studio's Make it real). Give a picture file path or a generated picture id, and the light in words. A new picture is made; the original stays. ${PAY} ${WAIT} The result goes to media, a shot's background, or nowhere. To light a shot in the app itself (free), use set_light.`,
     schema: {
       path: z.string().optional().describe("Full path of a PNG, JPG or WebP on this computer. Or give id."),
       id: z.string().optional().describe("A generated_pictures id instead of a path."),
@@ -251,10 +242,11 @@ export const MEDIA = [
       quality: z.enum(["1k", "2k", "4k"]).optional().describe("Default 2k. About 1.5 / 2 / 3 credits."),
       confirm: z.boolean().optional().describe("true only after the person agreed to the price."),
       put: z.enum(["media", "background", "none"]).optional().describe("Default media."),
-      shot: placeSchema.shot,
+      ...SHOT_ARGS,
     },
     annotations: PAID,
-    run: async (a) => {
+    run: async (raw) => {
+      const a = await onShot(raw);
       if (!a.path && !a.id) throw new Error("Give the picture: a path on this computer or a generated picture id.");
       const quality = a.quality ?? "2k";
       let image;
@@ -279,7 +271,7 @@ export const MEDIA = [
     description:
       "Free picture fixes on this computer for a picture already in a shot: trim its empty see-through edges, crop a percent off each side, or flip it. Give member (a cast member id with a picture) or leave it out for the shot's background picture. One undo step. Returns the new size. To remove a background (paid), use remove_background.",
     schema: {
-      shot: placeSchema.shot,
+      ...SHOT_ARGS,
       member: z.string().optional().describe("A cast member id with a picture. Left out: the shot's background picture."),
       trim: z.boolean().optional().describe("true: cut empty see-through edges."),
       flip: z.boolean().optional().describe("true: mirror it left to right."),
@@ -289,7 +281,7 @@ export const MEDIA = [
         .describe("Percent (0-45) off each side."),
     },
     annotations: CHANGE,
-    run: (a) => page("media_cutout", a),
+    run: async (a) => page("media_cutout", await onShot(a)),
   },
   {
     name: "upload",
@@ -298,7 +290,7 @@ export const MEDIA = [
     schema: {
       path: z.string().describe("Full path of the file on this computer."),
       as: z.enum(["media", "character", "object", "background", "video-background", "video-front", "sound", "music", "voice"]).optional().describe("How it goes into the project (see the description)."),
-      shot: placeSchema.shot,
+      ...SHOT_ARGS,
       replace: placeSchema.replace,
       name: placeSchema.name,
       sound_kind: z.enum(["sfx", "music", "voice"]).optional().describe("For as: sound, what it is (guessed from the name and length otherwise)."),
@@ -306,7 +298,8 @@ export const MEDIA = [
       trim: z.boolean().optional().describe("For a character/object picture: cut its empty see-through edges (default true)."),
     },
     annotations: CHANGE,
-    run: async (a) => {
+    run: async (raw) => {
+      const a = await onShot(raw);
       const file = localFile(a.path, null);
       const soundAsked = ["sound", "music", "voice"].includes(a.as);
       // A WebM can be either: a sound when it's asked for as one.
@@ -329,36 +322,39 @@ export const MEDIA = [
     },
   },
   {
-    name: "get_script",
+    name: "script",
     description:
-      "Read-only: the film's script from Sound and script: title, the chosen voice, every line (id, text, feeling, whether it has a voice and how long) and which shots speak it. Use line ids with assign_line, speak or own_voice. To put a script in, use write_script.",
-    schema: {},
-    annotations: READ,
-    run: () => page("media_script_view"),
-  },
-  {
-    name: "write_script",
-    description:
-      "Put a script in the film, the way Sound and script does. Give your own lines (short, 5-15 words, one shot each), or text (a whole script, cut into lines at sentences), or only a topic (Dinoctor's Claude writes it; uses the person's own Claude Code and can take a few minutes, so say so first). Unless put_in_film is false, lines go into a scene: shots there without a voice take lines in order, and each line left over becomes a new shot sized to it. Captions show a line's words until it has a voice. replace: false adds to the script. One undo step. Returns the lines and shots. To make the voices, call speak next; to give one shot one line, use assign_line.",
+      "The film's script, the way Sound and script does it. action get (read-only): title, the chosen voice, every line (id, text, feeling, whether it has a voice and how long) and which shots speak it; use the line ids with assign, speak or own_voice. action write: put a script in: your own lines (short, 5-15 words, one shot each), or text (a whole script, cut into lines at sentences), or only a topic (Dinoctor's Claude writes it; uses the person's own Claude Code and can take a few minutes, so say so first). Unless put_in_film is false, lines go into a scene: shots there without a voice take lines in order, and each line left over becomes a new shot sized to it. Captions show a line's words until it has a voice. replace: false adds to the script. action assign: give one shot (shot_id, or scene + shot; default the shot on screen) one line: the shot speaks that line's voice (or shows its words as a caption until it has one), replacing its own voice; fit: true makes the shot as long as the line. write and assign are one undo step each. To make the voices, call speak next.",
     schema: {
+      action: z.enum(["get", "write", "assign"]).describe("get the script, write lines into it, or assign one line to one shot."),
       lines: z
         .array(z.union([z.string(), z.object({ text: z.string().describe("The line."), feeling: z.enum(["neutral", "calm", "warm", "serious", "excited", "playful", "sad", "tense"]).optional().describe("How it's said.") })]))
         .optional()
-        .describe("Your own lines, in order: plain strings or { text, feeling }."),
-      text: z.string().optional().describe("A whole script to cut into lines at sentences."),
-      topic: z.string().optional().describe("Only a topic: Dinoctor's Claude writes the script."),
+        .describe("write: your own lines, in order: plain strings or { text, feeling }."),
+      text: z.string().optional().describe("write: a whole script to cut into lines at sentences."),
+      topic: z.string().optional().describe("write: only a topic: Dinoctor's Claude writes the script."),
       seconds: z.number().min(30).max(600).optional().describe("For a topic: how long the film is (default 60)."),
       tone: z.string().optional().describe("For a topic: the tone, like 'funny' or 'calm documentary'."),
       title: z.string().optional().describe("The script's title."),
       replace: z.boolean().optional().describe("false: add to the script instead of replacing it. Default true."),
       put_in_film: z.boolean().optional().describe("false: only keep the lines in the script, don't touch shots. Default true."),
-      scene: z.number().int().min(0).optional().describe("Scene index from 0. Default: the scene on screen."),
+      scene: z.number().int().min(0).optional().describe("write: the scene to put the lines in, index from 0 (default: the scene on screen). assign: with shot, the shot's scene."),
       new_shots: z.boolean().optional().describe("false: leftover lines wait instead of becoming new shots."),
-      fit: z.boolean().optional().describe("Existing shots that take a line get the line's length (default true)."),
+      fit: z.boolean().optional().describe("Shots that take a line get the line's length (write: default true; assign: default false)."),
       captions: z.boolean().optional().describe("Show captions of the lines (default true)."),
+      line: z.string().optional().describe("assign: a line id from action get."),
+      shot_id: SHOT_ARGS.shot_id.describe("assign: the shot's id from get_project. Or give scene and shot."),
+      shot: SHOT_ARGS.shot,
     },
     annotations: CHANGE,
     run: async (a) => {
+      if (a.action === "get") return page("media_script_view");
+      if (a.action === "assign") {
+        if (!a.line) throw new Error("Say which line with line (an id from script with action get).");
+        const shot = (await shotIdOf(a)) ?? (await page("status")).showing?.id;
+        return page("media_assign_line", { line: a.line, shot, fit: a.fit });
+      }
+      if (a.action !== "write") throw new Error('script needs an action: "get", "write" or "assign".');
       let lines;
       let title = a.title;
       if (a.lines?.length) lines = a.lines.map((l) => (typeof l === "string" ? { text: l } : l));
@@ -371,18 +367,6 @@ export const MEDIA = [
       } else throw new Error("Give lines, a text to cut into lines, or a topic for Claude to write about.");
       return page("media_script", { lines, title, topic: a.topic, replace: a.replace, put_in_film: a.put_in_film, scene: a.scene, new_shots: a.new_shots, fit: a.fit, captions: a.captions });
     },
-  },
-  {
-    name: "assign_line",
-    description:
-      "Give one shot one script line: the shot speaks that line's voice (or shows its words as a caption until it has one). It replaces the shot's own voice. One undo step. Returns the shot, line and length. To put a whole script into many shots at once, use write_script.",
-    schema: {
-      line: z.string().describe("A line id from get_script."),
-      shot: z.string().describe("A shot id from get_project."),
-      fit: z.boolean().optional().describe("true: make the shot as long as the line."),
-    },
-    annotations: SET,
-    run: (a) => page("media_assign_line", a),
   },
   {
     name: "voices",
@@ -406,7 +390,7 @@ export const MEDIA = [
     description:
       "Make the voice for script lines with ElevenLabs, with the time of every word, and give it to the shots that speak each line (captions follow the words; shots fit the voice unless fit is false). Spends the person's ElevenLabs characters: the first call (without confirm) returns the cost and what's left; ask, then call again with confirm: true. Default: every line without a voice, in the film's voice. Returns what was made and characters left. For the person's own recording (free), use own_voice.",
     schema: {
-      lines: z.array(z.string()).optional().describe("Line ids from get_script. Default: every line without a voice."),
+      lines: z.array(z.string()).optional().describe("Line ids from script with action get. Default: every line without a voice."),
       voice: z.string().optional().describe("An ElevenLabs voice id (voices). Default: the film's voice."),
       model: z.enum(["eleven_multilingual_v2", "eleven_v3", "eleven_flash_v2_5", "eleven_turbo_v2_5"]).optional().describe("Default eleven_multilingual_v2. Flash and turbo cost half."),
       again: z.boolean().optional().describe("Make the voice again even for lines that have one."),
@@ -417,9 +401,9 @@ export const MEDIA = [
     run: async (a) => {
       const s = await page("media_script_view");
       const voiceId = a.voice ?? s.voice?.id;
-      const chosen = a.lines?.length ? a.lines.map((id) => s.lines.find((l) => l.id === id) ?? (() => { throw new Error(`No script line has the id "${id}". Use get_script.`); })()) : s.lines.filter((l) => !l.voice || a.again);
+      const chosen = a.lines?.length ? a.lines.map((id) => s.lines.find((l) => l.id === id) ?? (() => { throw new Error(`No script line has the id "${id}". Use script with action get.`); })()) : s.lines.filter((l) => !l.voice || a.again);
       const todo = chosen.filter((l) => l.text.trim() && (a.again || !l.voice || a.lines?.length));
-      if (!s.lines.length) throw new Error("The script has no lines yet. Put some in with write_script first.");
+      if (!s.lines.length) throw new Error("The script has no lines yet. Put some in with script, action write, first.");
       if (!todo.length) return { nothing: true, note: "Every line has a voice already. Use again: true to make them again." };
       const status = await api("GET", "/api/speak/status");
       if (!status.connected) throw new Error("ElevenLabs isn't connected. The person adds their key in Sound and script.");
@@ -444,18 +428,21 @@ export const MEDIA = [
       "Use the person's own recording (a sound file on this computer) as a voice, free: for a script line (line), for a shot (it becomes that shot's line), or as a new line. Its words are heard on this computer when voice text is set up, so captions can follow them. cut_pauses takes out long pauses. One undo step. For an AI voice (paid) use speak; for music use music.",
     schema: {
       path: z.string().describe("Full path of the sound file (MP3, WAV, M4A...)."),
-      line: z.string().optional().describe("A line id from get_script that this recording speaks."),
-      shot: z.string().optional().describe("Or: a shot id; the recording becomes that shot's line."),
+      line: z.string().optional().describe("A line id (script with action get) that this recording speaks."),
+      shot_id: SHOT_ARGS.shot_id.describe("Or: a shot's id; the recording becomes that shot's line. Or give scene and shot."),
+      scene: SHOT_ARGS.scene,
+      shot: SHOT_ARGS.shot,
       text: z.string().optional().describe("What it says, if known."),
       cut_pauses: z.boolean().optional().describe("true: take out long pauses."),
       fit: z.boolean().optional().describe("true: the shot gets the recording's length."),
     },
     annotations: CHANGE,
-    run: async (a) => {
+    run: async (raw) => {
+      const a = await onShot(raw);
       const file = localFile(a.path, SOUNDISH, "a sound file (MP3, WAV, M4A...)");
       // A wrong shot or line is refused before anything is saved or listened to.
       if (a.shot) await page("get_shot", { id: a.shot });
-      if (a.line && !(await page("media_script_view")).lines.some((l) => l.id === a.line)) throw new Error(`No script line has the id "${a.line}". Use get_script.`);
+      if (a.line && !(await page("media_script_view")).lines.some((l) => l.id === a.line)) throw new Error(`No script line has the id "${a.line}". Use script with action get.`);
       let url = await saveSound(file, `rec-${stamp()}`);
       const heard = await postJson("/api/transcribe", { url }).catch((e) => ({ words: [], why: e.message }));
       let words = heard.words ?? [];
@@ -503,12 +490,14 @@ export const MEDIA = [
   {
     name: "sound_effects",
     description:
-      "Dinoctor's automatic sound effects (from the style's sound pack, worked out from what happens in each shot). Film-wide: on, volume, room tone. One shot: shot_on, shot_volume, and one sound by its event key: event_on, pick another sound, own_path (the person's own file), gain, nudge, reset. Call with just shot to list that shot's sounds and their event keys (no change). One undo step per change. For music use music; for any other sound file use upload as sound.",
+      "Dinoctor's automatic sound effects (from the style's sound pack, worked out from what happens in each shot). Film-wide: on, volume, room tone. One shot: shot_on, shot_volume, and one sound by its event key: event_on, pick another sound, own_path (the person's own file), gain, nudge, reset. Call with just the shot (shot_id, or scene + shot) to list that shot's sounds and their event keys (no change). One undo step per change. For music use music; for any other sound file use upload as sound.",
     schema: {
       on: z.boolean().optional().describe("Film-wide: sound effects on or off."),
       volume: z.number().optional().describe("Film-wide volume in dB, -18 to 6."),
       room: z.boolean().optional().describe("Film-wide: quiet room tone under everything."),
-      shot: z.string().optional().describe("A shot id. With only this, lists the shot's sounds."),
+      shot_id: SHOT_ARGS.shot_id.describe("A shot's id (or give scene and shot). With only this, lists the shot's sounds."),
+      scene: SHOT_ARGS.scene,
+      shot: SHOT_ARGS.shot,
       shot_on: z.boolean().optional().describe("This shot's sound effects on or off."),
       shot_volume: z.number().optional().describe("This shot's volume in dB."),
       event: z.string().optional().describe("One sound's event key, from the list."),
@@ -520,7 +509,8 @@ export const MEDIA = [
       reset: z.boolean().optional().describe("true: that sound back to automatic."),
     },
     annotations: SET,
-    run: async (a) => {
+    run: async (raw) => {
+      const a = await onShot(raw);
       const { own_path, ...rest } = a;
       if (own_path) {
         if (!a.event) throw new Error("Say which sound (event) the file replaces. Call sound_effects with the shot to list them.");

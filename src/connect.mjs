@@ -38,7 +38,8 @@ export const engineUp = async () => {
 const NOT_OPEN = "Dinoctor isn't open. Call open_dinoctor first (or ask the person to open the Dinoctor app).";
 
 // Calls the engine's own API (render, pictures, voices...). Plain node:http, not fetch: fetch gives up on an answer
-// after 5 minutes, and a look or a render on a busy computer can take longer. A dropped connection is tried once more.
+// after 5 minutes, and a look or a render on a busy computer can take longer. It says it comes from Dinoctor's own
+// page address, since the engine only takes some requests from there. A dropped connection is tried once more.
 const once = (method, route, body, timeoutMs) =>
   new Promise((resolve, reject) => {
     const port = enginePort();
@@ -81,7 +82,7 @@ export const api = async (method, route, body, timeoutMs = 120000) => {
   return data;
 };
 
-// Runs a tool inside the open Dinoctor window.
+// Runs a tool inside the open Dinoctor window (src/picker/agent/).
 export const page = async (tool, args = {}) => {
   const res = await api("POST", "/api/agent/call", { tool, args }, 11 * 60 * 1000).catch((e) => {
     throw e;

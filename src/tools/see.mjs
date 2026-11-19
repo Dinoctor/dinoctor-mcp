@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { api, page } from "../connect.mjs";
 import { LOCAL, READ, REPLACE } from "./hints.mjs";
+import { SHOT_ARGS, shotIdOf, withoutShot } from "./shot.mjs";
 
 // Keep it short: an AI reads it once before editing.
 const HOW_TO = `# Dinoctor project format (for edit_project and the other edit tools)
@@ -45,13 +46,13 @@ Tracks and what they can animate:
 - "adjust:<group>": that look's number settings, like "adjust:grain": amount, size
 A value with no key uses the thing's own setting. Each key's ease is how it travels on to the next key. Put a key at 0 with the start values when you animate something.
 
-Ids: new things need unique ids (like "member-claude-1", "text-claude-2"). After any change, use look to see it.`;
+Ids: new things need unique ids (like "member-claude-1", "text-claude-2"). After any change, use look_at_shot to see it.`;
 
-
-const where = {
-  id: z.string().optional().describe("A shot id (from get_project). Give this, or scene and shot. Left out: the shot on screen."),
-  scene: z.number().int().optional().describe("Scene index from 0."),
-  shot: z.number().int().optional().describe("Shot index in that scene, from 0."),
+// How the render started by render { action: "start" } is going.
+const renderStatus = async () => {
+  const s = await api("GET", "/api/render");
+  if (!s || !s.stage) return { running: false, note: "No render has run since Dinoctor started (or its file was deleted)." };
+  return { running: !!s.running, done: !!s.done && !s.cancelled && !s.error, stage: s.stage, progress: Math.round((s.progress ?? 0) * 100) / 100, frame: s.frame, total: s.total, seconds: s.seconds, file: s.done && !s.error && !s.cancelled ? s.file : undefined, error: s.error || undefined, cancelled: s.cancelled || undefined, note: s.note || undefined };
 };
 
 export const SEE = [
@@ -66,30 +67,31 @@ export const SEE = [
   {
     name: "library",
     description:
-      "Read-only: the ids a style offers, by category (characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions and outro moves, lights, looks, elements, samples), with names and short notes. With no category and no search it returns counts only; pass category and/or search to keep answers small. Every id you pass to cast, act, words, camera, light, place or transition must come from here. For ready-made shot recipes to add, use samples.",
+      "Read-only: the ids a style offers, by category (characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions and outro moves, lights, looks, elements, samples), with names and short notes. With no category and no search it returns counts only; pass category and/or search to keep answers small. Every id you pass to set_cast, direct_cast, set_text, set_camera, set_light, set_place or set_transition must come from here. For ready-made shot recipes to add, use samples.",
     schema: {
       style: z.string().optional().describe("A style id from list_styles. Default: the project's style."),
       category: z.string().optional().describe("One of: characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions, lights, looks, elements, samples."),
       search: z.string().optional().describe("Words to look for in id, name, group and note, like 'zoom' or 'sad'."),
       limit: z.number().int().optional().describe("Most items per category (default 150)."),
     },
+    output: { style: z.string().optional(), categories: z.record(z.string(), z.any()).optional(), note: z.string().optional(), found: z.string().optional() },
     annotations: READ,
     run: (a) => page("library", a),
   },
   {
     name: "how_to",
     description:
-      "Read-only reference text: the project format (Project > Scene > Shot fields), units (seconds vs percent), x/z ranges and keyframe tracks. Read it once before using edit_project. It doesn't need the app open. For the drawing format of draw_* tools, use describe_drawing.",
+      "Read-only reference text: the project format (Project > Scene > Shot fields), units (seconds vs percent), x/z ranges and keyframe tracks. Read it once before using edit_project. It doesn't need the app open. For the drawing format of draw, use draw with action describe.",
     schema: {},
     annotations: READ,
     run: () => HOW_TO,
   },
   {
-    name: "look",
+    name: "look_at_shot",
     description:
-      "See a shot: returns a picture (about 960 px wide) of a shot at a moment, plus its info, so you can check what you made and fix it. Give a shot (id, or scene and shot index; default the shot on screen) and seconds into it, or film: true with seconds into the whole film. It shows that shot in the editor and pauses it; the project isn't changed. Doesn't work while a render runs. For the shot's settings as data use get_shot; for a video file use render.",
+      "See a shot: returns a picture (about 960 px wide) of a shot at a moment, plus its info, so you can check what you made and fix it. Use it after changes. Give a shot (shot_id, or scene and shot index; default the shot on screen) and seconds into it, or film: true with seconds into the whole film. It shows that shot in the editor and pauses it; the project isn't changed. Doesn't work while a render runs. For the shot's settings as data use get_shot; for a video file use render.",
     schema: {
-      ...where,
+      ...SHOT_ARGS,
       seconds: z.number().optional().describe("Seconds into the shot (or the film with film: true). Default 0."),
       film: z.boolean().optional().describe("true: seconds counts from the start of the whole film."),
       width: z.number().int().optional().describe("Picture width in pixels, 240 to 1920. Default 960."),
@@ -97,17 +99,22 @@ export const SEE = [
     },
     annotations: READ,
     run: async (a) => {
-      const out = await page("look", a);
+      const id = a.film ? undefined : await shotIdOf(a, ["id"]);
+      const out = await page("look", { ...withoutShot(a, ["id"]), ...(id ? { id } : {}) });
       return { content: [{ type: "image", data: out.image, mimeType: out.mimeType }, { type: "text", text: JSON.stringify(out.info) }] };
     },
   },
   {
     name: "render",
     description:
-      "Start making a video file (MP4) of the film, one scene or one shot, the same way Export does. It returns at once; then call render_status until done (it gives the file path). Only one render runs at a time, and look doesn't work while it runs. quality draft is 540p and quick (for checking timing); final is full size and much slower. make wav or mp3 exports only the sound. Without save_to it goes to Dinoctor's renders folder. To stop it, use cancel_render.",
+      "Make a video file of the film, one scene or one shot, the same way Export does, and follow or stop it. action start (default): starts the render and returns at once; it gives no file yet. action status (read-only): stage, progress (0 to 1), frames and seconds so far; when done, the file path; or the error. Call it every 10 to 30 seconds while running. action cancel: stops the running render (no file is made; safe when nothing runs). Only one render runs at a time, and look_at_shot doesn't work while it runs. quality draft is 540p and quick (for checking timing); final is full size and much slower. make wav or mp3 exports only the sound. Without save_to it goes to Dinoctor's renders folder.",
     schema: {
-      what: z.enum(["film", "scene", "shot"]).optional().describe("What to render. Default film."),
-      ...{ id: z.string().optional().describe("A scene id (what: scene) or shot id (what: shot)."), scene: where.scene, shot: where.shot },
+      action: z.enum(["start", "status", "cancel"]).optional().describe("start (default) a render, status of the render, or cancel it."),
+      what: z.enum(["film", "scene", "shot"]).optional().describe("start: what to render. Default film (shot when shot_id is given)."),
+      shot_id: z.string().optional().describe("start: a shot id to render that shot."),
+      id: z.string().optional().describe("start: a scene id (what: scene) or shot id (what: shot)."),
+      scene: z.number().int().min(0).optional().describe("start: scene index from 0 (what: scene or shot)."),
+      shot: z.union([z.number().int().min(0), z.string()]).optional().describe("start: shot index from 0 in that scene (what: shot)."),
       quality: z.enum(["draft", "final"]).optional().describe("Default draft."),
       size: z.enum(["1080", "2k", "4k"]).optional().describe("Final only: picture size. Default 1080."),
       fps: z.number().int().optional().describe("24, 30 or 60 (final only)."),
@@ -117,26 +124,14 @@ export const SEE = [
       replace: z.boolean().optional().describe("Write over save_to if it's already there."),
     },
     annotations: LOCAL,
-    run: (a) => page("render", a),
-  },
-  {
-    name: "render_status",
-    description:
-      "Read-only: how the render started by render is going: stage, progress (0 to 1), frames and seconds so far; when done, the file path; or the error. Call every 10 to 30 seconds while running. Returns running: false when no render has run.",
-    schema: {},
-    annotations: READ,
-    run: async () => {
-      const s = await api("GET", "/api/render");
-      if (!s || !s.stage) return { running: false, note: "No render has run since Dinoctor started (or its file was deleted)." };
-      return { running: !!s.running, done: !!s.done && !s.cancelled && !s.error, stage: s.stage, progress: Math.round((s.progress ?? 0) * 100) / 100, frame: s.frame, total: s.total, seconds: s.seconds, file: s.done && !s.error && !s.cancelled ? s.file : undefined, error: s.error || undefined, cancelled: s.cancelled || undefined, note: s.note || undefined };
+    run: async (a) => {
+      const { action = "start", shot_id, ...rest } = a;
+      if (action === "status") return renderStatus();
+      if (action === "cancel") return page("cancel_render");
+      const shotId = shot_id ?? (typeof a.shot === "string" ? a.shot : undefined);
+      if (shotId) return page("render", { ...rest, shot: undefined, scene: undefined, what: a.what ?? "shot", id: shotId });
+      return page("render", rest);
     },
-  },
-  {
-    name: "cancel_render",
-    description: "Stop the render that's running (started by render). No video file is made; the project isn't changed. Safe to call when nothing runs. To stop a picture or style job, use picture_status with stop or cancel_style.",
-    schema: {},
-    annotations: LOCAL,
-    run: () => page("cancel_render"),
   },
   {
     name: "list_projects",

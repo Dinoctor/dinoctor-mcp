@@ -1,5 +1,12 @@
 # Next tool changes (for the next app update)
 
+**Status: done in the app repo (branch mcp-tools-merge).** 69 tools became 55: items 1 to 4 below are in, the old names
+are hidden aliases for one version (src/mcp/tools/index.mjs, tests/mcp-aliases.test.mjs), and the server says
+version 0.2.0. Still to do outside this repo: the npm package's README tool list, `skills/dinoctor-director/SKILL.md`,
+the website's /claude page, npm 0.2.0, `server.json`, `mcp-publisher publish` and Glama. The listed merges remove 13
+tools, not 24, so "about 45" would need more merges (for example `voices`/`speak`/`own_voice`, or the project-file
+tools), which were left alone on purpose.
+
 Version 0.1.1 only improved descriptions, input descriptions and annotations. Glama's tool-quality score (TDQS)
 also marks us down for **too many tools (69)** and **look-alike names**. Fixing that changes the tool API, so it
 has to ship together with a Dinoctor app update (the app has the same server built in) and a minor npm version.

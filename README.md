@@ -32,7 +32,7 @@ Restart Claude Desktop.
 
 ### Claude Code (plugin: server plus a directing skill)
 
-The plugin adds the server and a skill that teaches Claude how to direct a good video: plan a hook, pick ids from the style's library, act, move the camera, check every shot with `look`, and always ask before spending credits.
+The plugin adds the server and a skill that teaches Claude how to direct a good video: plan a hook, pick ids from the style's library, act, move the camera, check every shot with `look_at_shot`, and always ask before spending credits.
 
 ```
 /plugin install dinoctor --marketplace Dinoctor/dinoctor-mcp
@@ -100,16 +100,16 @@ Without the app, the server still starts and lists its tools; calls then answer 
 
 ## What the AI can do
 
-69 tools, in groups:
+55 tools, in groups (older tool names from 0.1 still work for now):
 
 - **Start and read**: `open_dinoctor`, `status`, `get_project`, `get_shot`, `go_to`, `how_to`
 - **Build the video**: `new_project`, `set_style`, `set_format`, `add_scene`, `add_shot`, `remove`, `move`, `duplicate`, `cut_shot`, `rename_scene`, `edit_project`
-- **Direct a shot**: `cast`, `act`, `words`, `camera`, `light`, `place`, `keys`, `transition`
-- **See it**: `list_styles`, `library`, `look` (a picture of any moment, so the AI checks its own work)
-- **Script, voice and sound**: `write_script`, `get_script`, `assign_line`, `voices`, `speak`, `own_voice`, `music`, `sound_effects`
-- **Pictures**: `generate_picture`, `generate_character`, `generate_place`, `picture_status`, `generated_pictures`, `put_picture`, `remove_background`, `relight`, `cutout`, `upload`, `generator_account`
-- **Styles and starting points**: `my_styles`, `make_style`, `style_status`, `continue_style`, `fix_style`, `cancel_style`, `rate_style`, `delete_style`, `use_style`, `samples`, `fill_spot`, `templates`, `describe_drawing`, `draw_character`, `draw_object`, `draw_place`
-- **Files and export**: `render`, `render_status`, `cancel_render`, `list_projects`, `open_project`, `save_project`
+- **Direct a shot**: `set_cast`, `direct_cast`, `set_text`, `set_camera`, `set_light`, `set_place`, `set_keyframes`, `set_transition`
+- **See it**: `list_styles`, `library`, `look_at_shot` (a picture of any moment, so the AI checks its own work)
+- **Script, voice and sound**: `script` (write, read, assign lines), `voices`, `speak`, `own_voice`, `music`, `sound_effects`
+- **Pictures**: `generate_picture` (characters, places, pictures), `generated_pictures`, `put_picture`, `remove_background`, `relight`, `cutout`, `upload`, `generator_account`
+- **Styles and starting points**: `my_styles`, `style_job` (build, fix, continue, cancel, status), `rate_style`, `delete_style`, `use_style`, `samples`, `fill_spot`, `templates`, `draw` (characters, objects, places)
+- **Files and export**: `render` (start, status, cancel), `list_projects`, `open_project`, `save_project`
 
 ## Safe by design
 

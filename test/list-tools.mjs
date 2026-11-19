@@ -9,7 +9,7 @@ const client = new Client({ name: "dinoctor-mcp-test", version: "1" });
 await client.connect(new StdioClientTransport({ command: process.execPath, args: [server], env: process.env }));
 const { tools } = await client.listTools();
 console.log(`${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
-if (tools.length < 60) throw new Error("Expected about 69 tools.");
+if (tools.length < 45) throw new Error("Expected about 55 tools.");
 for (const call of process.argv.slice(2)) {
   const [name, json] = call.split("::");
   const r = await client.callTool({ name, arguments: json ? JSON.parse(json) : {} });
