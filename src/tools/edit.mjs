@@ -158,6 +158,9 @@ export const EDIT = [
       accessory: z.string().optional().describe('hat, crown, party, bow (only characters that can dress), or "".'),
       pose: z.string().optional().describe("A pose id the character offers."),
       auto_x: z.boolean().optional().describe("change: true lets the scene space it out again."),
+      blend_mode: z.string().optional().describe("Blend tab: normal, multiply, screen, overlay, difference... (as set_text)."),
+      opacity: NUM("Blend tab: 0 to 100."),
+      shadow: z.boolean().optional().describe("false: casts no shadow."),
     },
   ),
   onShot(
@@ -184,7 +187,7 @@ export const EDIT = [
   onShot(
     "set_text",
     "words",
-    `Add, change or remove on-screen text in a shot (shot_id, or scene + shot; left out: the shot on screen). preset is one of the style's text presets (its look and font); action is its animation (pop, slam, type, fade, slide, drop...). ${LIB} Returns the shot and text ids. ${UNDO} For a script line that is spoken, use script with action write or assign (its captions come from the voice).`,
+    `Add, change or remove on-screen text in a shot (shot_id, or scene + shot; left out: the shot on screen). preset is one of the style's text presets (its look and font); action is its animation (pop, slam, type, fade, slide, drop...). ${LIB} Returns the shot and text ids. ${UNDO} For a script line that is spoken, use script with action write or assign (its captions come from the voice). A line break in words (\\n) starts a new line. Documentary only: depth places the words in the world like a person (and behind people), lit lets the scene's lights colour them.`,
     {
       op: z.enum(["add", "change", "remove"]).optional().describe("add if left out."),
       id: z.string().optional().describe("Text id, for change and remove."),
@@ -200,6 +203,12 @@ export const EDIT = [
       line_words: z.number().int().optional().describe("Words per line (2 if left out)."),
       color: z.string().optional().describe('"#RRGGBB", or "" for the preset\'s own.'),
       font: z.string().optional().describe('A font family the style offers, or "".'),
+      rotation: NUM("Turn in the picture, degrees."),
+      blend_mode: z.string().optional().describe("Blend tab: normal, multiply, screen, overlay, soft-light, hard-light, darken, lighten, color-dodge, color-burn, difference, exclusion, hue, saturation, color, luminosity."),
+      opacity: NUM("Blend tab: 0 to 100."),
+      effects: z.object({ blur: NUM("px, 0 is sharp."), bright: NUM("%, 100 is normal."), contrast: NUM("%, 100 is normal."), color: NUM("Saturation %, 100 is normal."), gray: NUM("Black and white %, 0 is none.") }).optional().describe("The Effects tab."),
+      depth: NUM("Documentary: Near / far in the world, near (+) / far (-), about -6 to 5; words usually stand at -1.5. Nearer is bigger. Puts it behind the people."),
+      lit: z.boolean().optional().describe("Documentary: true lets the scene's lights and look colour the words (off unless asked)."),
     },
   ),
   onShot(
@@ -229,6 +238,9 @@ export const EDIT = [
         .describe("Camera keys in time order."),
       replace_keys: z.boolean().optional().describe("false: add these keys to the ones there. Default replaces them."),
       clear_keys: z.boolean().optional().describe("true: drop camera keys, back to the move."),
+      blur_in: NUM("Documentary: frames everything takes to come into focus at the start; 0 is off (the default)."),
+      blur_out: NUM("Documentary: frames everything goes soft over at the end; 0 is off."),
+      focus: z.union([z.number(), z.literal("")]).optional().describe('Documentary: depth of field focus distance, near (+) / far (-); "" goes back to focusing on the first person. Animate it with set_keyframes "dof:shot".'),
     },
     SET,
   ),
@@ -283,7 +295,7 @@ export const EDIT = [
   onShot(
     "set_keyframes",
     "keys",
-    `Animate anything in a shot (shot_id, or scene + shot; left out: the shot on screen) by hand with keyframes on a track. Tracks: "cast:<member id>" (x, y, z, size, spin, turn), "item:<item id>" (x, z, size), "text:<text id>" (x, y, size), "light:<light id>" (x, y, z, intensity, color), "scene:light" (level, ambient), "mask:shot", "adjust:<group>", "element:<id>". op set puts values at a time (a first key after 0 also keys the resting value at 0), remove deletes the key at that time, clear drops the track. ${UNDO} For ready-made moves use direct_cast; for the camera use set_camera keys.`,
+    `Animate anything in a shot (shot_id, or scene + shot; left out: the shot on screen) by hand with keyframes on a track. Tracks: "cast:<member id>" (x, y, z, size, spin, turn, opacity), "item:<item id>" (x, z, size), "text:<text id>" (x, y, size, opacity, rot, fxBlur, fxBright, fxContrast, fxColor, fxGray, depth), "light:<light id>" (x, y, z, intensity, color), "scene:light" (level, ambient), "mask:shot", "adjust:<group>", "element:<id>", "dof:shot" (focus; Documentary, after set_camera focus), "backdrop:shot" (scale, x, y, rot of the background picture). op set puts values at a time (a first key after 0 also keys the resting value at 0), remove deletes the key at that time, clear drops the track. ${UNDO} For ready-made moves use direct_cast; for the camera use set_camera keys.`,
     {
       track: z.string().describe('Which thing, like "cast:member-1" or "scene:light" (ids from get_shot).'),
       op: z.enum(["set", "remove", "clear"]).optional().describe("set if left out."),

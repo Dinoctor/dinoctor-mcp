@@ -74,10 +74,15 @@ Do these per shot, then `look_at_shot`:
 - **Light:** `set_light {preset}` for the mood (warm day, night, spooky...). Keep the light steady inside a scene.
 - **Text:** `set_text` for the hook line, key numbers and short punchlines. Big and short (2 to 5 words), away from
   faces, near the top (y 15 to 25) or as captions near y 84. Pick a text preset and an animation from library.
+  In the Documentary style a text can stand in the world like a person (`depth`, near + / far -, and behind people) and
+  take the scene's light (`lit: true`). Any text can turn (`rotation`), blend (`blend_mode`, `opacity`) and get
+  `effects` (blur, brightness, contrast, colour, black and white). `\n` in the words starts a new line.
 - **Transition:** `set_transition {id}`. Mostly cuts; a matching or punchy transition on the big moments only.
   Ready-made combos add an end-of-shot move before the transition.
 - **Fine control:** `set_keyframes` animates anything over time (a character crossing the frame, text growing, a light
-  dimming). `edit_project` changes any field directly; read `how_to` once before using it.
+  dimming), including a text's opacity, rotation, effects and depth, the Documentary focus distance (`dof:shot`, after
+  `set_camera {focus}`) and the background picture (`backdrop:shot`). `edit_project` changes any field directly; read
+  `how_to` once before using it.
 
 ### 6. Pictures (optional, paid)
 If the style has no character or object that fits, `generate_picture` (kind character, background or picture)
