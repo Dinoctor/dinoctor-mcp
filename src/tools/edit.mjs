@@ -125,9 +125,9 @@ export const EDIT = [
   {
     name: "cut_shot",
     description: `Cut a shot (shot_id, or scene + shot; left out: the shot on screen) in two at a time, like a clip in an editor: both parts together play exactly what the shot played; the second keeps the transition and the voice stays in the first. Times round to 0.1 s and must be at least 0.2 s from either edge. Returns { first, second } shot ids. ${UNDO} To change only the length, use edit_project on seconds.`,
-    schema: { ...SHOT_ARGS, at: z.number().describe("Seconds into the shot where it's cut.") },
+    schema: { ...SHOT_ARGS, at: z.number().describe("Seconds into the shot where it's cut."), short: z.boolean().optional().describe("true: allow a part under 6 seconds in a wide film (only when the person asked for quick cuts).") },
     annotations: CHANGE,
-    run: async (a) => page("cut_shot", { id: await shotIdOf(a, ["id"]), at: a.at }),
+    run: async (a) => page("cut_shot", { id: await shotIdOf(a, ["id"]), at: a.at, short: a.short }),
   },
   tool(
     "rename_scene",
@@ -145,6 +145,8 @@ export const EDIT = [
     {
       op: z.enum(["add", "change", "remove"]).optional().describe("add if left out."),
       ref: z.string().optional().describe("Character or object id (add), or a new one of the same kind (change swaps it)."),
+      picture: z.string().optional().describe("add: a picture from the project's Media (its id or name, see get_project media) joins the cast as a person or thing you can place, size and frame (use this for the person's own cut-out pictures, not cards). With as."),
+      as: z.enum(["character", "object"]).optional().describe("add with picture: a person (character, default) or a thing (object)."),
       member: z.string().optional().describe("Member id or name (change, remove)."),
       name: z.string().optional().describe("A name for this member, like 'Mia'. Used by direct_cast and in undo notes."),
       x: NUM("Left (-) to right (+); about -8 to 8 is in frame."),
@@ -161,6 +163,10 @@ export const EDIT = [
       blend_mode: z.string().optional().describe("Blend tab: normal, multiply, screen, overlay, difference... (as set_text)."),
       opacity: NUM("Blend tab: 0 to 100."),
       shadow: z.boolean().optional().describe("false: casts no shadow."),
+      mirror: z.boolean().optional().describe("Place tab: flip the picture left to right."),
+      sticker: z.boolean().optional().describe("Color tab: a white sticker edge around a cut-out picture."),
+      glow: z.union([z.literal(false), z.object({ color: COLOR("Glow colour"), strength: NUM("0.1 to 1 (0.6 usual)."), pulse: z.boolean().optional() })]).optional().describe("Color tab: a soft glow around the picture; false removes it."),
+      anchor: z.object({ x: NUM("0 to 1 across the picture."), y: NUM("0 to 1 down the picture."), size: NUM("Its size when the anchor was set (usually the member's size).") }).optional().describe("Place tab: the point it turns and grows around."),
     },
   ),
   onShot(
@@ -202,6 +208,8 @@ export const EDIT = [
       until: PCT("When it leaves"),
       line_words: z.number().int().optional().describe("Words per line (2 if left out)."),
       color: z.string().optional().describe('"#RRGGBB", or "" for the preset\'s own.'),
+      accent: z.string().optional().describe('A preset\'s own colour (the box behind a label, a bar, the keyword), "#RRGGBB", or "" for its own.'),
+      options: z.record(z.string(), z.any()).optional().describe('A preset\'s own Look-tab choices, as get_shot shows them in the text\'s kit, like {"speed": 1.8} or {"keys": [2]}. null removes one.'),
       font: z.string().optional().describe('A font family the style offers, or "".'),
       rotation: NUM("Turn in the picture, degrees."),
       blend_mode: z.string().optional().describe("Blend tab: normal, multiply, screen, overlay, soft-light, hard-light, darken, lighten, color-dodge, color-burn, difference, exclusion, hue, saturation, color, luminosity."),
@@ -217,6 +225,7 @@ export const EDIT = [
     `Set a shot's camera (shot_id, or scene + shot; left out: the shot on screen): a preset move with strength and wiggle, or direct it with camera keys (keys win over the move). Each key: at (seconds) and any of x, y, z, distance, height, angle, roll, ease; what a key leaves out is taken from where the camera is at that moment. ${LIB} Returns the camera settings. ${UNDO} For the end-of-shot camera move into the next shot, use set_transition (outro_camera).`,
     {
       move: z.string().optional().describe("Camera move id (library cameras). Clears camera keys."),
+      replace_move: z.boolean().optional().describe("true: replace a shot move's camera with yours. Only when its framing is broken; otherwise call shot_move again."),
       strength: NUM("How far the move goes, 0 to 100."),
       wiggle: NUM("Handheld feel: 0 locked off, 1 normal, up to 3."),
       keys: z
@@ -231,6 +240,7 @@ export const EDIT = [
             angle: NUM("Degrees around the point."),
             roll: NUM("Tilt of the picture, about -3.2 to 3.2."),
             ease: z.string().optional().describe("smooth, even, fast-start, slow-start, punch, bounce"),
+            bez: z.array(z.number()).length(4).optional().describe("Her own curve instead of a named ease: [x1, y1, x2, y2] like CSS cubic-bezier (x 0..1). Example: [0.7, 0, 0.2, 1] creeps then rushes; [0.1, 0.9, 0.2, 1] snaps then settles."),
             still: z.boolean().optional().describe("true on a single key: a locked camera that doesn't move."),
           }),
         )
@@ -239,6 +249,7 @@ export const EDIT = [
       replace_keys: z.boolean().optional().describe("false: add these keys to the ones there. Default replaces them."),
       clear_keys: z.boolean().optional().describe("true: drop camera keys, back to the move."),
       blur_in: NUM("Documentary: frames everything takes to come into focus at the start; 0 is off (the default)."),
+      depth_of_field: z.boolean().optional().describe("Documentary: false = Focus on Off, everything sharp; true = soft background again."),
       blur_out: NUM("Documentary: frames everything goes soft over at the end; 0 is off."),
       focus: z.union([z.number(), z.literal("")]).optional().describe('Documentary: depth of field focus distance, near (+) / far (-); "" goes back to focusing on the first person. Animate it with set_keyframes "dof:shot".'),
     },
@@ -270,6 +281,7 @@ export const EDIT = [
     `Set where a shot happens (shot_id, or scene + shot; left out: the shot on screen): a place preset (with its scenery), and/or its colours and sky, and scenery items. ${LIB} Returns the place and its item ids. ${UNDO} For a generated photo background use generate_picture with kind background; for your own picture use upload with as background.`,
     {
       preset: z.string().optional().describe("Place preset id (library places)."),
+      picture: z.string().optional().describe("A picture from the project's Media (its id or name, see get_project media) as the whole background of the shot: it fills the frame. The best way to show the person's own photos full-frame."),
       name: z.string().optional().describe("A name for the place."),
       sky: COLOR("Sky colour"),
       horizon: COLOR("Horizon colour"),
@@ -302,6 +314,7 @@ export const EDIT = [
       at: z.number().optional().describe("Seconds into the shot."),
       values: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])).optional().describe('Like {"x": 3, "size": 1.4}.'),
       ease: z.string().optional().describe("How it travels on to the next key: smooth, even, fast-start, slow-start, punch, bounce."),
+      bez: z.array(z.number()).length(4).optional().describe("Her own curve instead of a named ease: [x1, y1, x2, y2] like CSS cubic-bezier (x 0..1). Example: [0.7, 0, 0.2, 1] creeps then rushes; [0.1, 0.9, 0.2, 1] snaps then settles."),
     },
   ),
   onShot(

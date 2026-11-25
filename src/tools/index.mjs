@@ -6,8 +6,9 @@ import { EDIT } from "./edit.mjs";
 import { SEE } from "./see.mjs";
 import { MEDIA } from "./media.mjs";
 import { STYLES } from "./styles.mjs";
+import { MORE } from "./more.mjs";
 
-export const TOOLS = [...CORE, ...EDIT, ...SEE, ...MEDIA, ...STYLES];
+export const TOOLS = [...CORE, ...EDIT, ...SEE, ...MEDIA, ...STYLES, ...MORE];
 
 // Old tool name -> [new tool, how its arguments change]. Version 0.2 merged look-alike tools and gave short names a
 // verb. Saved prompts and older skills still call the old names, so they keep working until the next version.

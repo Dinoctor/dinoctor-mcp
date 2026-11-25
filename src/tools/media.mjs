@@ -324,7 +324,7 @@ export const MEDIA = [
   {
     name: "script",
     description:
-      "The film's script, the way Sound and script does it. action get (read-only): title, the chosen voice, every line (id, text, feeling, whether it has a voice and how long) and which shots speak it; use the line ids with assign, speak or own_voice. action write: put a script in: your own lines (short, 5-15 words, one shot each), or text (a whole script, cut into lines at sentences), or only a topic (Dinoctor's Claude writes it; uses the person's own Claude Code and can take a few minutes, so say so first). Unless put_in_film is false, lines go into a scene: shots there without a voice take lines in order, and each line left over becomes a new shot sized to it. Captions show a line's words until it has a voice. replace: false adds to the script. action assign: give one shot (shot_id, or scene + shot; default the shot on screen) one line: the shot speaks that line's voice (or shows its words as a caption until it has one), replacing its own voice; fit: true makes the shot as long as the line. write and assign are one undo step each. To make the voices, call speak next.",
+      "The film's script, the way Sound and script does it. action get (read-only): title, the chosen voice, every line (id, text, feeling, whether it has a voice and how long) and which shots speak it; use the line ids with assign, speak or own_voice. action write: put a script in: your own lines (each line is one shot: on YouTube (horizontal) a line is 2 to 4 sentences, 10 to 20 seconds, so the story can move inside the shot; in reels (vertical) a short sentence), or text (a whole script, cut at sentences; give shot_seconds to join sentences into shots of about that length), or only a topic (Dinoctor's Claude writes it; uses the person's own Claude Code and can take a few minutes, so say so first). Unless put_in_film is false, lines go into a scene: shots there without a voice take lines in order, and each line left over becomes a new shot sized to it. Captions show a line's words until it has a voice. replace: false adds to the script. action assign: give one shot (shot_id, or scene + shot; default the shot on screen) one line: the shot speaks that line's voice (or shows its words as a caption until it has one), replacing its own voice; fit: true makes the shot as long as the line. write and assign are one undo step each. To make the voices, call speak next.",
     schema: {
       action: z.enum(["get", "write", "assign"]).describe("get the script, write lines into it, or assign one line to one shot."),
       lines: z
@@ -332,6 +332,7 @@ export const MEDIA = [
         .optional()
         .describe("write: your own lines, in order: plain strings or { text, feeling }."),
       text: z.string().optional().describe("write: a whole script to cut into lines at sentences."),
+      shot_seconds: z.number().min(2).max(40).optional().describe("write with text: join sentences so each line (one shot) is about this many seconds of speech. Horizontal YouTube films: 10 to 18. Vertical reels: leave out (one sentence a shot)."),
       topic: z.string().optional().describe("write: only a topic: Dinoctor's Claude writes the script."),
       seconds: z.number().min(30).max(600).optional().describe("For a topic: how long the film is (default 60)."),
       tone: z.string().optional().describe("For a topic: the tone, like 'funny' or 'calm documentary'."),
@@ -358,7 +359,20 @@ export const MEDIA = [
       let lines;
       let title = a.title;
       if (a.lines?.length) lines = a.lines.map((l) => (typeof l === "string" ? { text: l } : l));
-      else if (a.text?.trim()) lines = (await api("POST", "/api/script/split", { text: a.text })).lines.map((l) => ({ text: l.text }));
+      else if (a.text?.trim()) {
+        lines = (await api("POST", "/api/script/split", { text: a.text })).lines.map((l) => ({ text: l.text }));
+        // Long YouTube shots: sentences joined until a line is about shot_seconds long, at about 2.6 spoken words a second.
+        if (a.shot_seconds) {
+          const words = (t) => t.split(/\s+/).filter(Boolean).length;
+          const most = a.shot_seconds * 2.6;
+          lines = lines.reduce((out, l) => {
+            const last = out[out.length - 1];
+            if (last && words(last.text) + words(l.text) <= most * 1.15 && words(last.text) < most * 0.8) last.text = `${last.text} ${l.text}`;
+            else out.push({ text: l.text });
+            return out;
+          }, []);
+        }
+      }
       else if (a.topic?.trim()) {
         const samples = await page("media_script_samples");
         const out = await api("POST", "/api/script/write", { topic: a.topic, seconds: a.seconds ?? 60, tone: a.tone, samples }, 11 * 60 * 1000);

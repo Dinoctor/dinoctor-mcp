@@ -66,7 +66,7 @@ export const CORE = [
   {
     name: "edit_project",
     description:
-      'Low-level edit of any project setting by JSON Pointer path (read how_to once for the format, get_shot for a real shot). Each change: {"op":"replace"|"add"|"remove"|"merge","path":"/scenes/0/shots/1/seconds","value":4}. All changes in one call are one undo step; a bad path or value is refused and nothing changes. Returns { done: number of changes }. Prefer the specific tools (set_cast, direct_cast, set_text, set_camera, set_light, set_place, set_transition, set_keyframes); use this only for fields they don\'t cover.',
+      'Low-level edit of any project setting by JSON Pointer path (read how_to once for the format, get_shot for a real shot). Each change: {"op":"replace"|"add"|"remove"|"merge","path":"/scenes/0/shots/1/seconds","value":4}. All changes in one call are one undo step; a bad path or value is refused and nothing changes. Returns { done: number of changes }. Prefer the specific tools (set_cast, direct_cast, set_text, set_camera, set_light, set_place, set_transition, set_keyframes, add_preset, set_element, set_look, set_world, sound_fx); use this only for fields they don\'t cover.',
     schema: {
       changes: z
         .array(

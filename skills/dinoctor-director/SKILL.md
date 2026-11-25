@@ -27,7 +27,10 @@ characters that act, readable text, and cuts that flow.
    on top of each other. Don't tell the person a shot is done before you've looked at it.
 4. **Everything is undoable**, so make bold choices, but keep the person in the loop: `go_to` the shot you work
    on so they see it.
-5. **Keep it short.** Most shots are 2 to 4 seconds. A 30 second video is about 8 to 12 shots.
+5. **Read `directing_guide` first.** It is how Dinoctor directs: palette, pace, captions, the story inside each shot.
+6. **The story happens inside the shot.** Don't cut at every sentence. In reels (tall), shots are about 3 to 6
+   seconds; on YouTube (wide), 10 to 20 seconds. Inside each shot the camera zooms in, pans, brings the next thing
+   in and pulls back: `shot_move` does this for you. Use the cool transitions between shots, a different one each time.
 
 ## The workflow
 
@@ -68,7 +71,8 @@ Do these per shot, then `look_at_shot`:
 - **Acting:** `direct_cast` gives each shot something happening: an action (`type` from library actions) timed with
   `when` or `at`, an `emotion` that changes at the key moment, `talk` while a line is spoken, `look` toward whoever
   speaks. A shot where nobody moves feels dead.
-- **Camera:** `set_camera {move, strength}`. Vary it: push-ins for emphasis, wide shots to show the place, close
+- **Camera:** start with `shot_move` (spotlight, entrance, reveal, orbit, compare; short versions for reels, a drift
+  for shots with nobody in them). Otherwise `set_camera {move, strength}`. Vary it: push-ins for emphasis, wide shots to show the place, close
   moves on faces for feelings, a quick move for energy. Don't use the same move on two shots in a row. For a
   precise move, use camera `set_keyframes`.
 - **Light:** `set_light {preset}` for the mood (warm day, night, spooky...). Keep the light steady inside a scene.

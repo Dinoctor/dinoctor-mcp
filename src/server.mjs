@@ -13,7 +13,7 @@ const server = new McpServer(
   { name: "dinoctor", version: "0.2.0" },
   {
     instructions:
-      "Dinoctor is a video app where you direct animated videos: a project has scenes, a scene has shots, and a shot has a place, a cast of characters and objects, actions, text, a camera move, lighting and a transition. Start with open_dinoctor, then get_project. Use library to see what each style offers before choosing ids. Name a shot with shot_id, or scene and shot indexes (left out: the shot on screen). After changes, use look_at_shot to see the shot and fix what's wrong. Tools that spend the person's credits return a price first and need confirm: true; always ask the person before confirming.",
+      "Dinoctor is a video app where you direct animated videos: a project has scenes, a scene has shots, and a shot has a place, a cast of characters and objects, actions, text, a camera move, lighting and a transition. Before making or changing a video, read directing_guide: it is how Dinoctor's editor directs, and Dinoctor videos follow it unless the person asks otherwise. Start with open_dinoctor, then get_project. Use library to see what each style offers before choosing ids. Name a shot with shot_id, or scene and shot indexes (left out: the shot on screen). After changes, use look_at_shot to see the shot and fix what's wrong. Tools that spend the person's credits return a price first and need confirm: true; always ask the person before confirming.",
   },
 );
 

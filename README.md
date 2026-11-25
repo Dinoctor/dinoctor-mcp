@@ -34,11 +34,14 @@ Restart Claude Desktop.
 
 The plugin adds the server and a skill that teaches Claude how to direct a good video: plan a hook, pick ids from the style's library, act, move the camera, check every shot with `look_at_shot`, and always ask before spending credits.
 
+Type these two lines in Claude Code, one after the other (works on every version):
+
 ```
-/plugin install dinoctor --marketplace Dinoctor/dinoctor-mcp
+/plugin marketplace add Dinoctor/dinoctor-mcp
+/plugin install dinoctor@dinoctor
 ```
 
-On older Claude Code: `/plugin marketplace add Dinoctor/dinoctor-mcp`, then `/plugin install dinoctor@dinoctor`.
+On Claude Code 2.1.275 or newer you can also do it in one line: `/plugin install dinoctor --marketplace Dinoctor/dinoctor-mcp`. (Searching for "Dinoctor" in the plugin browser finds nothing until the first line has added the marketplace.)
 
 Server only:
 
@@ -100,12 +103,13 @@ Without the app, the server still starts and lists its tools; calls then answer 
 
 ## What the AI can do
 
-55 tools, in groups (older tool names from 0.1 still work for now):
+62 tools, in groups. They match Dinoctor 0.4.6; update the app (Help, Check for updates) to use the newest ones.
 
-- **Start and read**: `open_dinoctor`, `status`, `get_project`, `get_shot`, `go_to`, `how_to`
+- **Start and read**: `open_dinoctor`, `status`, `get_project`, `get_shot`, `go_to`, `how_to`, `directing_guide` (how Dinoctor directs a video: pace, palette, captions, the story inside each shot)
 - **Build the video**: `new_project`, `set_style`, `set_format`, `add_scene`, `add_shot`, `remove`, `move`, `duplicate`, `cut_shot`, `rename_scene`, `edit_project`
-- **Direct a shot**: `set_cast`, `direct_cast`, `set_text`, `set_camera`, `set_light`, `set_place`, `set_keyframes`, `set_transition`
-- **See it**: `list_styles`, `library`, `look_at_shot` (a picture of any moment, so the AI checks its own work)
+- **Direct a shot**: `set_cast`, `direct_cast`, `set_text`, `set_camera`, `set_light`, `set_place`, `set_keyframes`, `set_transition`, `shot_move` (a whole camera story inside one shot: spotlight, entrance, reveal, orbit, compare; short versions for reels)
+- **Looks and extras**: `add_preset` (hooks, labels, cards, real maps), `set_element` (fog, sparks, light and more), `set_look`, `set_world`, `sound_fx`
+- **See it**: `list_styles`, `library`, `look_at_shot` (a picture of any moment plus a list of problems it found: words off the frame or too small, captions on a face, an empty screen, a shot of only words, so the AI checks its own work)
 - **Script, voice and sound**: `script` (write, read, assign lines), `voices`, `speak`, `own_voice`, `music`, `sound_effects`
 - **Pictures**: `generate_picture` (characters, places, pictures), `generated_pictures`, `put_picture`, `remove_background`, `relight`, `cutout`, `upload`, `generator_account`
 - **Styles and starting points**: `my_styles`, `style_job` (build, fix, continue, cancel, status), `rate_style`, `delete_style`, `use_style`, `samples`, `fill_spot`, `templates`, `draw` (characters, objects, places)

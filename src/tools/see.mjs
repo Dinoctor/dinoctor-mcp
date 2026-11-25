@@ -2,6 +2,7 @@
 // files. Most run inside the open Dinoctor window.
 
 import { z } from "zod";
+import { DIRECTING } from "../directing.mjs";
 import { api, page } from "../connect.mjs";
 import { LOCAL, READ, REPLACE } from "./hints.mjs";
 import { SHOT_ARGS, shotIdOf, withoutShot } from "./shot.mjs";
@@ -27,8 +28,8 @@ Shot (paths look like /scenes/0/shots/1/seconds; get_shot shows a real one, copy
 - texts: SceneText[] { id, words, preset (library "text_presets"), x, y (% of the frame, centre of the text: 50,50 is the middle), size (1 normal, 0.3..3), action (library "text_animations"), when: "start"|"middle"|"end", at?, until? (% through the shot it appears/leaves), font?, color?, lineWords?, sweep: {on, loop, when}, glow: {on, color, pulse} }.
 - transition: how it changes into the NEXT shot: a transition id from library "transitions" ("cut" = none). transitionSeconds? overrides its length. transitionColor?, transitionWord?, transitionAt? [0..1, 0..1] for the ones that use them.
 - outro: { camera?: outro camera id, effect?: outro effect id, character?: { move, ref, size } } — plays at the end of the shot, before the transition.
-- adjust?: whole-picture looks, see library "looks": { grain|noise|vignette|hold|curve|warp|paper|duotone: { on: true, ...settings } }.
-- elements?: moving elements (styles that have them): see library "elements".
+- adjust?: whole-picture looks, see library "looks": { grain|noise|vignette|hold|curve|warp|paper|duotone: { on: true, ...settings } }. Set them with set_look.
+- elements?: the Effects menu, moving elements and pieces placed by hand (styles that have them): see library "elements". Add and change them with set_element. Samples, Presets (hooks, labels, cards): add_preset. Documentary worlds: set_world. Each sound's volume, fades, trims, effect and ending: sound_fx.
 - mask?, lens? { target: member id|"lead"|"manual", distance, blur, range, show }, paths? (members walk along points [x, z] over timing % ranges), notes?, voice?, sound?.
 - thumb: a picture the page takes by itself. Never write it.
 
@@ -67,10 +68,10 @@ export const SEE = [
   {
     name: "library",
     description:
-      "Read-only: the ids a style offers, by category (characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions and outro moves, lights, looks, elements, samples), with names and short notes. With no category and no search it returns counts only; pass category and/or search to keep answers small. Every id you pass to set_cast, direct_cast, set_text, set_camera, set_light, set_place or set_transition must come from here. For ready-made shot recipes to add, use samples.",
+      "Read-only: the ids a style offers, by category (characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions and outro moves, lights, looks, elements, samples, presets, worlds, sound_effects), with names and short notes. With no category and no search it returns counts only; pass category and/or search to keep answers small. Every id you pass to set_cast, direct_cast, set_text, set_camera, set_light, set_place or set_transition must come from here. For ready-made shot recipes to add, use samples.",
     schema: {
       style: z.string().optional().describe("A style id from list_styles. Default: the project's style."),
-      category: z.string().optional().describe("One of: characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions, lights, looks, elements, samples."),
+      category: z.string().optional().describe("One of: characters, objects, places, cameras, actions, emotions, text_presets, text_animations, transitions, lights, looks, elements (moving and placed effects), samples, presets (Samples, Presets), worlds (Documentary), sound_effects (voice effects and endings)."),
       search: z.string().optional().describe("Words to look for in id, name, group and note, like 'zoom' or 'sad'."),
       limit: z.number().int().optional().describe("Most items per category (default 150)."),
     },
@@ -87,9 +88,17 @@ export const SEE = [
     run: () => HOW_TO,
   },
   {
+    name: "directing_guide",
+    description:
+      "Read-only: how Dinoctor's own editor directs a video, her rules for framing, camera, timing to the script, backgrounds, light, worlds, effects, transitions and people. Read it BEFORE you make or change a video, every time someone asks for one, even with no details: follow it unless the person asks otherwise. It doesn't need the app open.",
+    schema: {},
+    annotations: READ,
+    run: () => DIRECTING,
+  },
+  {
     name: "look_at_shot",
     description:
-      "See a shot: returns a picture (about 960 px wide) of a shot at a moment, plus its info, so you can check what you made and fix it. Use it after changes. Give a shot (shot_id, or scene and shot index; default the shot on screen) and seconds into it, or film: true with seconds into the whole film. It shows that shot in the editor and pauses it; the project isn't changed. Doesn't work while a render runs. For the shot's settings as data use get_shot; for a video file use render.",
+      "See a shot: returns a picture (about 960 px wide) of a shot at a moment, plus its info (including light: brightness, darkest, brightest and colour of the frame, 0 to 255; and problems: mistakes found in the shot itself, like sample pictures left in a card or a cut-out used as the background, which must all be fixed), so you can check what you made and fix it. Use it after changes. Give a shot (shot_id, or scene and shot index; default the shot on screen) and seconds into it, or film: true with seconds into the whole film. It shows that shot in the editor and pauses it; the project isn't changed. Doesn't work while a render runs. For the shot's settings as data use get_shot; for a video file use render.",
     schema: {
       ...SHOT_ARGS,
       seconds: z.number().optional().describe("Seconds into the shot (or the film with film: true). Default 0."),
@@ -116,6 +125,7 @@ export const SEE = [
       scene: z.number().int().min(0).optional().describe("start: scene index from 0 (what: scene or shot)."),
       shot: z.union([z.number().int().min(0), z.string()]).optional().describe("start: shot index from 0 in that scene (what: shot)."),
       quality: z.enum(["draft", "final"]).optional().describe("Default draft."),
+      mark: z.boolean().optional().describe("start: the small \"Made with Dinoctor\" corner mark on or off. Left out: the person's own export setting."),
       size: z.enum(["1080", "2k", "4k"]).optional().describe("Final only: picture size. Default 1080."),
       fps: z.number().int().optional().describe("24, 30 or 60 (final only)."),
       blur: z.boolean().optional().describe("Motion blur for final (about 4 times slower). Default on where possible."),
